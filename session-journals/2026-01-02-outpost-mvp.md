@@ -1,105 +1,141 @@
 # Session Journal: 2026-01-02-outpost-mvp
 
-**Status:** Checkpoint 2
+**Status:** Complete
 **Application:** Outpost
-**Date:** 2026-01-02T22:00:00Z
+**Date:** 2026-01-02
 
 ## Session Summary
 
-Created Outpost - a headless Claude Code executor that enables Claude UI sessions to dispatch coding tasks to a remote server. Successfully tested end-to-end with file modification.
+Created Outpost - a multi-agent headless executor system. Successfully deployed BOTH Claude Code and OpenAI Codex as dispatchers, enabling parallel AI agent execution from Claude UI.
 
-## Accomplishments
+## Major Accomplishments
 
-### 1. Architecture Design
-- Designed dispatch/return pattern using AWS SSM
-- Documented token transfer auth for subscription-based Claude Code
-- Created run artifact structure (task.md, output.log, summary.json, diff.patch)
+### 1. Claude Code Integration ✅
+- Installed Claude Code v2.0.76 on SOC server
+- Discovered macOS Keychain → Linux file auth pattern
+- Credentials: `~/.claude/.credentials.json`
+- E2E tested with file listing and modification
 
-### 2. Server Setup (SOC - 52.44.78.2)
-- Installed Claude Code v2.0.76
-- Configured Max subscription auth via token transfer from macOS Keychain
-- Key discovery: Linux uses `~/.claude/.credentials.json` (with leading dot)
-- Set up Git credentials with PAT for repo access
-- Created executor directory structure at `/home/ubuntu/claude-executor/`
+### 2. OpenAI Codex Integration ✅
+- Installed Codex CLI v0.77.0 on SOC server
+- Simpler auth: `~/.codex/auth.json` (file-based on both platforms)
+- E2E tested with same file listing task
+- Uses ChatGPT Plus subscription (no API charges)
 
-### 3. Scripts Deployed
-| Script | Purpose | Location |
-|--------|---------|----------|
-| dispatch.sh | Execute tasks | /home/ubuntu/claude-executor/ |
-| get-results.sh | Retrieve outputs | /home/ubuntu/claude-executor/scripts/ |
-| push-changes.sh | Commit/push | /home/ubuntu/claude-executor/scripts/ |
-| list-runs.sh | List runs | /home/ubuntu/claude-executor/scripts/ |
+### 3. Multi-Agent Architecture
 
-### 4. End-to-End Tests
+```
+┌─────────────────────────────────────────┐
+│         CLAUDE UI (Orchestrator)        │
+│              "The Commander"            │
+└─────────┬───────────────┬───────────────┘
+          │               │
+    ┌─────▼─────┐   ┌─────▼─────┐
+    │ dispatch  │   │ dispatch- │
+    │ .sh       │   │ codex.sh  │
+    │ (Claude)  │   │ (Codex)   │
+    └───────────┘   └───────────┘
+          │               │
+          └───────┬───────┘
+                  ▼
+    ┌─────────────────────────────────────┐
+    │        SHARED INFRASTRUCTURE        │
+    │  runs/, repos/, Git credentials     │
+    └─────────────────────────────────────┘
+```
 
-**Test 1 - Read-only (PASSED):**
+## Test Results
+
+### Claude Code Test
 ```json
 {
   "run_id": "20260102-205023-cs429e",
-  "repo": "swords-of-chaos-reborn",
+  "executor": "claude",
   "status": "success",
-  "changes": "none"
+  "result": "11 JavaScript files"
 }
 ```
 
-**Test 2 - File modification (PASSED):**
+### OpenAI Codex Test
 ```json
 {
-  "run_id": "20260102-215357-um2q2x",
-  "repo": "swords-of-chaos-reborn", 
+  "run_id": "20260102-230123-codex-lq1bfm",
+  "executor": "codex",
   "status": "success",
-  "changes": "uncommitted"
+  "result": "11 JavaScript files"
 }
 ```
-- Added comment to server.js
-- Diff captured correctly
-- Changes discarded after review (test only)
 
-### 5. GitHub Repo Created
-- https://github.com/rgsuarez/outpost
-- README.md with full architecture docs
-- All scripts committed
-- OUTPOST_SOUL.md for zeOS integration
+**Both agents returned the same correct answer.**
 
-### 6. zeOS Integration
-- Added apps/outpost/OUTPOST_SOUL.md to zeOS repo
-- Defined boot sequence for Outpost sessions
+## Technical Details
 
-## Key Technical Discoveries
+### Executors Comparison
 
-1. **macOS Keychain Storage:** Claude Code on macOS stores credentials in Keychain, not file
-   - Extract with: `security find-generic-password -s "Claude Code-credentials" -w`
+| Aspect | Claude Code | OpenAI Codex |
+|--------|-------------|--------------|
+| Version | 2.0.76 | 0.77.0 |
+| Model | claude-sonnet-4-20250514 | gpt-5.2-codex |
+| Headless | `claude -p "task"` | `codex exec "task"` |
+| Skip Approvals | `--dangerously-skip-permissions` | `--full-auto` |
+| Auth Location | ~/.claude/.credentials.json | ~/.codex/auth.json |
+| Subscription | Claude Max ($100/mo) | ChatGPT Plus ($20/mo) |
 
-2. **Linux Credentials Path:** `~/.claude/.credentials.json` (hidden file with leading dot)
+### Infrastructure
 
-3. **Token Format:** OAuth tokens include accessToken, refreshToken, expiresAt, scopes, subscriptionType
+| Component | Value |
+|-----------|-------|
+| Server | SOC (52.44.78.2) |
+| SSM Instance | mi-0d77bfe39f630bd5c |
+| Executor Path | /home/ubuntu/claude-executor/ |
+| Dispatchers | dispatch.sh, dispatch-codex.sh |
 
-4. **No API Charges:** Max subscription covers Claude Code CLI usage
+## Files Created
 
-5. **Claude Code is General-Purpose:** Not limited to coding - can do any Claude task plus file I/O
+**GitHub (rgsuarez/outpost):**
+- scripts/dispatch.sh (Claude Code)
+- scripts/dispatch-codex.sh (OpenAI Codex)
+- scripts/get-results.sh
+- scripts/push-changes.sh
+- scripts/list-runs.sh
+- docs/OUTPOST_SOUL.md
+- docs/CODEX_INTEGRATION_SCOPE.md
+- README.md
 
-## Strategic Insight
+**GitHub (rgsuarez/zeOS):**
+- apps/outpost/OUTPOST_SOUL.md
 
-Outpost enables multi-agent orchestration:
-- Claude UI as orchestrator dispatching to multiple executors
-- Same pattern works for OpenAI Codex, Gemini CLI
-- Enables parallel execution, specialization, redundancy, cost optimization
+**SOC Server:**
+- /home/ubuntu/claude-executor/dispatch.sh
+- /home/ubuntu/claude-executor/dispatch-codex.sh
+- /home/ubuntu/.claude/.credentials.json
+- /home/ubuntu/.codex/auth.json
+
+## Strategic Impact
+
+Outpost now enables:
+1. **Multi-model comparison** - Same task to different AIs
+2. **Parallel execution** - Race conditions for speed
+3. **Specialization** - Route by task type
+4. **Fallback** - Redundancy if one rate-limits
+5. **Cost optimization** - Use cheaper model when adequate
+
+## Cost Model
+
+| Service | Monthly Cost | Usage |
+|---------|--------------|-------|
+| Claude Max | $100 | Unlimited Claude Code |
+| ChatGPT Plus | $20 | Unlimited Codex |
+| **Total** | **$120** | Two full-power executors |
 
 ## Next Actions
 
-1. Scope OpenAI Codex integration (in progress)
-2. Research Codex auth model (subscription vs API)
-3. Create dispatch-codex.sh variant
-4. Test multi-agent parallel execution
+1. Create unified dispatcher with `--executor` flag
+2. Add parallel execution mode (`--executor both`)
+3. Build comparison tooling
+4. Update list-runs.sh to show executor type
+5. Consider Gemini CLI integration
 
-## Files Changed This Session
+---
 
-**Created:**
-- rgsuarez/outpost (entire repo)
-- rgsuarez/zeOS/apps/outpost/OUTPOST_SOUL.md
-
-**Server (SOC):**
-- /home/ubuntu/claude-executor/dispatch.sh
-- /home/ubuntu/claude-executor/scripts/*.sh
-- /home/ubuntu/.claude/.credentials.json
-- /home/ubuntu/.git-credentials
+**Session Complete. Multi-agent Outpost operational.**
