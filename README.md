@@ -1,137 +1,76 @@
 # Outpost
 
-**Multi-agent headless executor for AI-powered code tasks.**
+**Multi-Agent Headless Executor System**
 
-Outpost enables Claude UI to dispatch coding tasks to remote servers running AI coding agents (Claude Code and OpenAI Codex), bridging conversational AI with hands-on code execution.
+Outpost enables Claude UI sessions to dispatch coding tasks to remote servers running multiple AI coding agents in parallel.
+
+## Fleet Status
+
+| Agent | Model | Status | Dispatcher |
+|-------|-------|--------|------------|
+| Claude Code | claude-sonnet-4 | ✅ Active | `dispatch.sh` |
+| OpenAI Codex | gpt-5.2-codex | ✅ Active | `dispatch-codex.sh` |
+| Gemini CLI | gemini-2.5-pro | ✅ Active | `dispatch-gemini.sh` |
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              CLAUDE UI (Orchestrator)           │
-│           AWS SSM SendCommand                   │
-└───────────┬───────────────────┬─────────────────┘
-            │                   │
-            ▼                   ▼
-    ┌───────────────┐   ┌───────────────┐
-    │ dispatch.sh   │   │ dispatch-     │
-    │ Claude Code   │   │ codex.sh      │
-    │               │   │ OpenAI Codex  │
-    └───────┬───────┘   └───────┬───────┘
-            │                   │
-            └─────────┬─────────┘
-                      ▼
-    ┌─────────────────────────────────────────────┐
-    │           SHARED INFRASTRUCTURE             │
-    │   repos/ (cloned repos)                     │
-    │   runs/  (execution artifacts)              │
-    │   Git credentials (push capability)         │
-    └─────────────────────────────────────────────┘
+Claude UI (Orchestrator) → AWS SSM SendCommand
+    ↓                    ↓                    ↓
+dispatch.sh      dispatch-codex.sh    dispatch-gemini.sh
+(Claude Code)    (OpenAI Codex)       (Gemini CLI)
+    ↓                    ↓                    ↓
+        Shared Infrastructure
+        (repos/, runs/, git credentials)
 ```
-
-## Executors
-
-| Executor | Model | Subscription | Dispatcher |
-|----------|-------|--------------|------------|
-| Claude Code | claude-sonnet-4-20250514 | Claude Max | dispatch.sh |
-| OpenAI Codex | gpt-5.2-codex | ChatGPT Plus | dispatch-codex.sh |
 
 ## Quick Start
 
-### Dispatch a Task (Claude Code)
-
 ```bash
+# Dispatch to Claude Code
 aws ssm send-command \
   --instance-ids "mi-0d77bfe39f630bd5c" \
   --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch.sh swords-of-chaos-reborn \"Fix the bug in server.js\""]'
+  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch.sh repo-name \"task\""]'
+
+# Dispatch to OpenAI Codex
+aws ssm send-command ... 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-codex.sh repo-name \"task\""]'
+
+# Dispatch to Gemini CLI
+aws ssm send-command ... 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-gemini.sh repo-name \"task\""]'
 ```
 
-### Dispatch a Task (OpenAI Codex)
+## Cost Model
 
-```bash
-aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
-  --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-codex.sh swords-of-chaos-reborn \"Fix the bug in server.js\""]'
-```
+| Service | Monthly | Notes |
+|---------|---------|-------|
+| Claude Max | $100 | Unlimited Claude Code |
+| ChatGPT Plus | $20 | Unlimited Codex CLI |
+| Google AI Ultra | ~$50 | Highest Gemini limits |
+| **Total** | **$170** | Three AI executors, no API charges |
 
-### Get Results
+## Documentation
 
-```bash
-# List recent runs
-sudo -u ubuntu /home/ubuntu/claude-executor/scripts/list-runs.sh
-
-# Get specific run
-sudo -u ubuntu /home/ubuntu/claude-executor/scripts/get-results.sh <run-id> all
-```
-
-### Push Changes
-
-```bash
-sudo -u ubuntu /home/ubuntu/claude-executor/scripts/push-changes.sh <repo> "commit message"
-```
-
-## Run Artifacts
-
-Each run creates:
-
-```
-runs/<run-id>/
-├── task.md          # Original task
-├── output.log       # Agent stdout/stderr
-├── summary.json     # Metadata (executor, status, sha)
-└── diff.patch       # Git changes (if any)
-```
-
-## Authentication
-
-Both agents use subscription-based auth (no API charges):
-
-| Agent | Auth File | Source |
-|-------|-----------|--------|
-| Claude Code | ~/.claude/.credentials.json | macOS Keychain transfer |
-| OpenAI Codex | ~/.codex/auth.json | File-based on both platforms |
-
-## Multi-Agent Use Cases
-
-1. **Comparison** - Same task to both, compare results
-2. **Parallel** - Race for fastest solution
-3. **Specialization** - Route by task type
-4. **Fallback** - Redundancy if one rate-limits
-5. **Cost optimization** - Use cheaper model when adequate
+- [Multi-Agent Integration Guide](docs/MULTI_AGENT_INTEGRATION.md) - Complete setup and usage
+- [Outpost Soul](docs/OUTPOST_SOUL.md) - zeOS integration
 
 ## Scripts
 
 | Script | Purpose |
 |--------|---------|
-| dispatch.sh | Claude Code executor |
-| dispatch-codex.sh | OpenAI Codex executor |
-| get-results.sh | Retrieve run outputs |
-| push-changes.sh | Commit and push changes |
-| list-runs.sh | List recent runs |
+| `dispatch.sh` | Execute task via Claude Code |
+| `dispatch-codex.sh` | Execute task via OpenAI Codex |
+| `dispatch-gemini.sh` | Execute task via Gemini CLI |
+| `get-results.sh` | Retrieve run outputs |
+| `list-runs.sh` | List recent runs |
+| `push-changes.sh` | Commit and push approved changes |
 
-## Server Details
+## Server
 
-| Component | Value |
-|-----------|-------|
-| Server | SOC (52.44.78.2) |
-| SSM Instance | mi-0d77bfe39f630bd5c |
-| Executor Path | /home/ubuntu/claude-executor/ |
-| Region | us-east-1 |
+- **Host:** SOC (52.44.78.2)
+- **SSM Instance:** mi-0d77bfe39f630bd5c
+- **Region:** us-east-1
 
-## Cost Model
+## License
 
-| Service | Monthly | Includes |
-|---------|---------|----------|
-| Claude Max | $100 | Unlimited Claude Code |
-| ChatGPT Plus | $20 | Unlimited Codex |
-| **Total** | **$120** | Two AI executors |
-
-## Future
-
-- [ ] Unified dispatcher with `--executor` flag
-- [ ] Parallel execution (`--executor both`)
-- [ ] Comparison tooling
-- [ ] Gemini CLI integration
-- [ ] S3 storage for large outputs
+Private - Zero Echelon LLC
