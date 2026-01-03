@@ -1,56 +1,98 @@
 #!/bin/bash
-# dispatch-codex.sh - Outpost Codex dispatcher
-#
-# Usage: ./dispatch-codex.sh <repo> <task description>
+# dispatch-codex.sh - Headless Codex CLI executor for Outpost
+# Uses ChatGPT Plus subscription with GPT-5.2 Codex model
 
 set -e
 
-REPO=$1
-shift
-TASK="$*"
-RUN_ID=$(date +%Y%m%d-%H%M%S)-codex-$(head /dev/urandom | tr -dc a-z0-9 | head -c 6)
-RUN_DIR="/home/ubuntu/claude-executor/runs/$RUN_ID"
-REPO_DIR="/home/ubuntu/claude-executor/repos/$REPO"
+REPO_NAME="${1:-}"
+TASK="${2:-}"
+
+if [[ -z "$REPO_NAME" || -z "$TASK" ]]; then
+    echo "Usage: dispatch-codex.sh <repo-name> \"<task>\""
+    exit 1
+fi
+
+EXECUTOR_DIR="/home/ubuntu/claude-executor"
+REPOS_DIR="$EXECUTOR_DIR/repos"
+RUNS_DIR="$EXECUTOR_DIR/runs"
+GITHUB_USER="rgsuarez"
+GITHUB_TOKEN="${GITHUB_TOKEN:-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}"
+
+RUN_ID="$(date +%Y%m%d-%H%M%S)-codex-$(head /dev/urandom | tr -dc a-z0-9 | head -c 6)"
+RUN_DIR="$RUNS_DIR/$RUN_ID"
+
+echo "🚀 Codex dispatch starting..."
+echo "Run ID: $RUN_ID"
+echo "Model: gpt-5.2-codex"
+echo "Repo: $REPO_NAME"
+echo "Task: $TASK"
 
 mkdir -p "$RUN_DIR"
 echo "$TASK" > "$RUN_DIR/task.md"
-echo "{\"run_id\": \"$RUN_ID\", \"repo\": \"$REPO\", \"executor\": \"codex\", \"started\": \"$(date -Iseconds)\", \"status\": \"running\"}" > "$RUN_DIR/summary.json"
 
-if [ ! -d "$REPO_DIR" ]; then
-    git clone "https://github.com/rgsuarez/$REPO.git" "$REPO_DIR"
+mkdir -p "$REPOS_DIR"
+REPO_PATH="$REPOS_DIR/$REPO_NAME"
+
+if [[ -d "$REPO_PATH" ]]; then
+    echo "📦 Updating existing repo..."
+    cd "$REPO_PATH"
+    git fetch origin
+    git reset --hard origin/main
+else
+    echo "📦 Cloning repo..."
+    cd "$REPOS_DIR"
+    git clone "https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${REPO_NAME}.git"
 fi
 
-cd "$REPO_DIR"
-git fetch origin
-git reset --hard origin/main
-git clean -fd
-
+cd "$REPO_PATH"
 BEFORE_SHA=$(git rev-parse HEAD)
+echo "Before SHA: $BEFORE_SHA"
 
-echo "Starting OpenAI Codex at $(date -Iseconds)" >> "$RUN_DIR/output.log"
+echo "🤖 Running Codex CLI (GPT-5.2)..."
+export HOME=/home/ubuntu
 
+# --full-auto: non-interactive mode
+# --sandbox workspace-write: allow file writes in workspace
+# --skip-git-repo-check: don't require trusted git repo
 codex exec \
     --full-auto \
     --sandbox workspace-write \
-    "$TASK" 2>&1 | tee -a "$RUN_DIR/output.log"
+    --skip-git-repo-check \
+    "$TASK" 2>&1 | tee "$RUN_DIR/output.log"
+EXIT_CODE=${PIPESTATUS[0]}
 
-CODEX_EXIT=$?
-
-AFTER_SHA=$(git rev-parse HEAD 2>/dev/null || echo "$BEFORE_SHA")
-
-if [ "$BEFORE_SHA" != "$AFTER_SHA" ]; then
+AFTER_SHA=$(git rev-parse HEAD)
+if [[ "$BEFORE_SHA" != "$AFTER_SHA" ]]; then
     git diff "$BEFORE_SHA" "$AFTER_SHA" > "$RUN_DIR/diff.patch"
     CHANGES="committed"
-elif [ -n "$(git status --porcelain)" ]; then
-    git diff > "$RUN_DIR/diff.patch"
-    CHANGES="uncommitted"
 else
-    CHANGES="none"
+    git diff > "$RUN_DIR/diff.patch"
+    if [[ -s "$RUN_DIR/diff.patch" ]]; then
+        CHANGES="uncommitted"
+    else
+        CHANGES="none"
+    fi
 fi
 
-STATUS=$([ $CODEX_EXIT -eq 0 ] && echo "success" || echo "failed")
-echo "{\"run_id\": \"$RUN_ID\", \"repo\": \"$REPO\", \"executor\": \"codex\", \"completed\": \"$(date -Iseconds)\", \"status\": \"$STATUS\", \"exit_code\": $CODEX_EXIT, \"before_sha\": \"$BEFORE_SHA\", \"after_sha\": \"$AFTER_SHA\", \"changes\": \"$CHANGES\"}" > "$RUN_DIR/summary.json"
+[[ $EXIT_CODE -eq 0 ]] && STATUS="success" || STATUS="failed"
 
-echo "=== RUN COMPLETE (CODEX) ==="
+cat > "$RUN_DIR/summary.json" << SUMMARY
+{
+  "run_id": "$RUN_ID",
+  "repo": "$REPO_NAME",
+  "executor": "codex",
+  "model": "gpt-5.2-codex",
+  "completed": "$(date -Iseconds)",
+  "status": "$STATUS",
+  "exit_code": $EXIT_CODE,
+  "before_sha": "$BEFORE_SHA",
+  "after_sha": "$AFTER_SHA",
+  "changes": "$CHANGES"
+}
+SUMMARY
+
+echo ""
+echo "✅ Codex dispatch complete"
 echo "Run ID: $RUN_ID"
-cat "$RUN_DIR/summary.json"
+echo "Status: $STATUS"
+echo "Changes: $CHANGES"
