@@ -1,7 +1,6 @@
 #!/bin/bash
 # dispatch-gemini.sh - Headless Gemini CLI executor for Outpost
-# Uses Google AI Ultra subscription via OAuth
-# Part of the Outpost multi-agent executor system
+# Uses Google AI Ultra subscription with Gemini 3 Pro model
 
 set -e
 
@@ -10,34 +9,27 @@ TASK="${2:-}"
 
 if [[ -z "$REPO_NAME" || -z "$TASK" ]]; then
     echo "Usage: dispatch-gemini.sh <repo-name> \"<task>\""
-    echo "Example: dispatch-gemini.sh swords-of-chaos-reborn \"Fix the bug in server.js\""
     exit 1
 fi
 
-# Configuration
 EXECUTOR_DIR="/home/ubuntu/claude-executor"
 REPOS_DIR="$EXECUTOR_DIR/repos"
 RUNS_DIR="$EXECUTOR_DIR/runs"
 GITHUB_USER="rgsuarez"
-# Note: Token should be set via environment variable in production
-GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+GITHUB_TOKEN="${GITHUB_TOKEN:-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}"
 
-# Generate run ID with gemini identifier
 RUN_ID="$(date +%Y%m%d-%H%M%S)-gemini-$(head /dev/urandom | tr -dc a-z0-9 | head -c 6)"
 RUN_DIR="$RUNS_DIR/$RUN_ID"
 
 echo "🚀 Gemini dispatch starting..."
 echo "Run ID: $RUN_ID"
+echo "Model: gemini-3-pro-preview"
 echo "Repo: $REPO_NAME"
 echo "Task: $TASK"
 
-# Create run directory
 mkdir -p "$RUN_DIR"
-
-# Save task
 echo "$TASK" > "$RUN_DIR/task.md"
 
-# Clone or update repo
 mkdir -p "$REPOS_DIR"
 REPO_PATH="$REPOS_DIR/$REPO_NAME"
 
@@ -53,18 +45,14 @@ else
 fi
 
 cd "$REPO_PATH"
-
-# Get current SHA
 BEFORE_SHA=$(git rev-parse HEAD)
 echo "Before SHA: $BEFORE_SHA"
 
-# Execute Gemini CLI in headless mode with YOLO (auto-approve all tools)
-echo "🤖 Running Gemini CLI..."
+echo "🤖 Running Gemini CLI (Gemini 3 Pro)..."
 export HOME=/home/ubuntu
-gemini -p "$TASK" --yolo 2>&1 | tee "$RUN_DIR/output.log"
+gemini --model gemini-3-pro-preview --yolo -p "$TASK" 2>&1 | tee "$RUN_DIR/output.log"
 EXIT_CODE=${PIPESTATUS[0]}
 
-# Get after SHA and diff
 AFTER_SHA=$(git rev-parse HEAD)
 if [[ "$BEFORE_SHA" != "$AFTER_SHA" ]]; then
     git diff "$BEFORE_SHA" "$AFTER_SHA" > "$RUN_DIR/diff.patch"
@@ -78,20 +66,14 @@ else
     fi
 fi
 
-# Determine status
-if [[ $EXIT_CODE -eq 0 ]]; then
-    STATUS="success"
-else
-    STATUS="failed"
-fi
+[[ $EXIT_CODE -eq 0 ]] && STATUS="success" || STATUS="failed"
 
-# Create summary
 cat > "$RUN_DIR/summary.json" << SUMMARY
 {
   "run_id": "$RUN_ID",
   "repo": "$REPO_NAME",
   "executor": "gemini",
-  "model": "gemini-2.5-pro",
+  "model": "gemini-3-pro-preview",
   "completed": "$(date -Iseconds)",
   "status": "$STATUS",
   "exit_code": $EXIT_CODE,
@@ -106,5 +88,3 @@ echo "✅ Gemini dispatch complete"
 echo "Run ID: $RUN_ID"
 echo "Status: $STATUS"
 echo "Changes: $CHANGES"
-echo ""
-echo "Results in: $RUN_DIR/"
