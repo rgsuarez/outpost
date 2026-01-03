@@ -1,4 +1,6 @@
-# Outpost Interface Specification v1.2
+# Outpost Interface Specification v1.3
+
+> **v1.3 Feature:** Workspace Isolation - each agent runs in its own repo copy for true parallel execution.
 
 > **Cross-Project API Contract for Multi-Agent Dispatch**
 
@@ -194,12 +196,12 @@ AWS_SECRET_ACCESS_KEY: [In richie profile preferences]
 
 ## Version
 
-**Outpost v1.2** — Four-agent fleet with invocation constraints
+**Outpost v1.3** — Four-agent fleet with invocation constraints
 
 ### Changelog
 - v1.0: Initial release (3 agents: Claude, Codex, Gemini)
 - v1.1: Added Aider with DeepSeek Coder backend
-- v1.2: Added explicit invocation constraints, error documentation, guard file
+- v1.3: Added explicit invocation constraints, error documentation, guard file
 
 ---
 
