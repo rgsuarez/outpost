@@ -1,6 +1,6 @@
 #!/bin/bash
-# dispatch-aider.sh - Headless Aider executor for Outpost v1.2
-# Uses DeepSeek API (low-cost, high-quality code model)
+# dispatch-aider.sh - Headless Aider executor for Outpost v1.3
+# WORKSPACE ISOLATION: Each run gets its own repo copy
 
 REPO_NAME="${1:-}"
 TASK="${2:-}"
@@ -25,6 +25,7 @@ fi
 
 RUN_ID="$(date +%Y%m%d-%H%M%S)-aider-$(head /dev/urandom | tr -dc a-z0-9 | head -c 6)"
 RUN_DIR="$RUNS_DIR/$RUN_ID"
+WORKSPACE="$RUN_DIR/workspace"
 
 echo "🚀 Aider dispatch starting..."
 echo "Run ID: $RUN_ID"
@@ -35,58 +36,40 @@ echo "Task: $TASK"
 mkdir -p "$RUN_DIR"
 echo "$TASK" > "$RUN_DIR/task.md"
 
-# Initialize output log
 exec > >(tee -a "$RUN_DIR/output.log") 2>&1
 
-mkdir -p "$REPOS_DIR"
-REPO_PATH="$REPOS_DIR/$REPO_NAME"
+SOURCE_REPO="$REPOS_DIR/$REPO_NAME"
 
-# Handle repo setup with error handling
-if [[ -d "$REPO_PATH" ]]; then
-    echo "📦 Updating existing repo..."
-    cd "$REPO_PATH"
-    if ! git fetch origin 2>&1; then
-        echo "⚠️ Git fetch failed - continuing with local state"
-    fi
-    if ! git reset --hard origin/main 2>&1; then
-        echo "⚠️ Git reset failed - continuing with current HEAD"
-    fi
-else
-    echo "📦 Cloning repo..."
-    cd "$REPOS_DIR"
-    if ! git clone "https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${REPO_NAME}.git" 2>&1; then
-        echo "❌ Git clone failed - repo may not exist"
-        cat > "$RUN_DIR/summary.json" << SUMMARY
-{
-  "run_id": "$RUN_ID",
-  "repo": "$REPO_NAME",
-  "executor": "aider",
-  "model": "deepseek/deepseek-coder",
-  "completed": "$(date -Iseconds)",
-  "status": "failed",
-  "exit_code": 1,
-  "error": "git clone failed - repo may not exist on GitHub"
-}
+if [[ -z "$OUTPOST_CACHE_READY" ]]; then
+    if [[ ! -d "$SOURCE_REPO" ]]; then
+        echo "📦 Initial clone from GitHub..."
+        mkdir -p "$REPOS_DIR"
+        if ! git clone "https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${REPO_NAME}.git" "$SOURCE_REPO" 2>&1; then
+            echo "❌ Git clone failed"
+            cat > "$RUN_DIR/summary.json" << SUMMARY
+{"run_id":"$RUN_ID","repo":"$REPO_NAME","executor":"aider","status":"failed","error":"git clone failed"}
 SUMMARY
-        exit 1
+            exit 1
+        fi
     fi
+    echo "📦 Updating cache..."
+    (cd "$SOURCE_REPO" && git fetch origin && git reset --hard origin/main) 2>&1 || echo "⚠️ Cache update failed"
+else
+    echo "📦 Using pre-warmed cache"
 fi
 
-cd "$REPO_PATH"
+echo "📂 Creating isolated workspace..."
+mkdir -p "$WORKSPACE"
+rsync -a --delete "$SOURCE_REPO/" "$WORKSPACE/"
+
+cd "$WORKSPACE"
 BEFORE_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
-echo "Before SHA: $BEFORE_SHA"
+echo "Workspace SHA: $BEFORE_SHA"
 
 echo "🤖 Running Aider (DeepSeek Coder)..."
 export HOME=/home/ubuntu
 
-# Run Aider in message mode (non-interactive, single task)
-# --yes-always auto-approves all changes
-# --no-git disables aider's auto-commit (we handle git ourselves)
-"$AIDER_ENV/aider" \
-    --model deepseek/deepseek-coder \
-    --yes-always \
-    --no-git \
-    --message "$TASK" 2>&1
+"$AIDER_ENV/aider" --model deepseek/deepseek-coder --yes-always --no-git --message "$TASK" 2>&1
 EXIT_CODE=$?
 
 AFTER_SHA=$(git rev-parse HEAD 2>/dev/null || echo "$BEFORE_SHA")
@@ -95,11 +78,7 @@ if [[ "$BEFORE_SHA" != "$AFTER_SHA" && "$BEFORE_SHA" != "unknown" ]]; then
     CHANGES="committed"
 else
     git diff > "$RUN_DIR/diff.patch" 2>/dev/null
-    if [[ -s "$RUN_DIR/diff.patch" ]]; then
-        CHANGES="uncommitted"
-    else
-        CHANGES="none"
-    fi
+    [[ -s "$RUN_DIR/diff.patch" ]] && CHANGES="uncommitted" || CHANGES="none"
 fi
 
 [[ $EXIT_CODE -eq 0 ]] && STATUS="success" || STATUS="failed"
@@ -115,7 +94,8 @@ cat > "$RUN_DIR/summary.json" << SUMMARY
   "exit_code": $EXIT_CODE,
   "before_sha": "$BEFORE_SHA",
   "after_sha": "$AFTER_SHA",
-  "changes": "$CHANGES"
+  "changes": "$CHANGES",
+  "workspace": "$WORKSPACE"
 }
 SUMMARY
 
@@ -124,3 +104,4 @@ echo "✅ Aider dispatch complete"
 echo "Run ID: $RUN_ID"
 echo "Status: $STATUS"
 echo "Changes: $CHANGES"
+echo "Workspace: $WORKSPACE"
