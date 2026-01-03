@@ -1,4 +1,6 @@
 #!/bin/bash
+# Source environment if available
+[[ -f /home/ubuntu/claude-executor/.env ]] && source /home/ubuntu/claude-executor/.env
 # dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.4
 # WORKSPACE ISOLATION: Each agent gets its own repo copy - true parallelism
 # v1.4: Security hardening, race condition fix, dynamic branch detection, timeout
