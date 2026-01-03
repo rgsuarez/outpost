@@ -1,9 +1,9 @@
 #!/bin/bash
 # Source environment if available
 [[ -f /home/ubuntu/claude-executor/.env ]] && source /home/ubuntu/claude-executor/.env
-# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.4
+# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.4.3
 # WORKSPACE ISOLATION: Each agent gets its own repo copy - true parallelism
-# v1.4: Security hardening, race condition fix, dynamic branch detection, timeout
+# v1.4.3: Auto-sync scripts from GitHub before dispatch
 
 REPO_NAME="${1:-}"
 TASK="${2:-}"
@@ -25,10 +25,8 @@ if [[ -z "$REPO_NAME" || -z "$TASK" ]]; then
     exit 1
 fi
 
-# C2 FIX: Require GITHUB_TOKEN from environment
 if [[ -z "$GITHUB_TOKEN" ]]; then
     echo "❌ FATAL: GITHUB_TOKEN environment variable not set"
-    echo "   Set it in /home/ubuntu/.bashrc or via SSM environment"
     exit 1
 fi
 
@@ -42,7 +40,7 @@ GITHUB_USER="rgsuarez"
 BATCH_ID="$(date +%Y%m%d-%H%M%S)-batch-$(head /dev/urandom | tr -dc a-z0-9 | head -c 4)"
 
 echo "═══════════════════════════════════════════════════════════════"
-echo "🚀 OUTPOST UNIFIED DISPATCH v1.4"
+echo "🚀 OUTPOST UNIFIED DISPATCH v1.4.3"
 echo "═══════════════════════════════════════════════════════════════"
 echo "Batch ID:   $BATCH_ID"
 echo "Repo:       $REPO_NAME"
@@ -52,10 +50,59 @@ echo "Isolation:  ENABLED (each agent gets own workspace)"
 echo "═══════════════════════════════════════════════════════════════"
 echo ""
 
+# ═══════════════════════════════════════════════════════════════════
+# v1.4.3: AUTO-SYNC DISPATCH SCRIPTS FROM GITHUB
+# ═══════════════════════════════════════════════════════════════════
+SCRIPTS_CACHE="$EXECUTOR_DIR/.scripts-sync"
+SYNC_INTERVAL=300  # 5 minutes
+
+sync_scripts() {
+    echo "🔄 Syncing dispatch scripts from GitHub..."
+    local SCRIPTS_URL="https://raw.githubusercontent.com/rgsuarez/outpost/main/scripts"
+    
+    for script in dispatch.sh dispatch-codex.sh dispatch-gemini.sh dispatch-aider.sh; do
+        curl -sL "$SCRIPTS_URL/$script" -o "$EXECUTOR_DIR/$script.new" 2>/dev/null
+        if [[ -s "$EXECUTOR_DIR/$script.new" ]]; then
+            mv "$EXECUTOR_DIR/$script.new" "$EXECUTOR_DIR/$script"
+            chmod +x "$EXECUTOR_DIR/$script"
+        else
+            rm -f "$EXECUTOR_DIR/$script.new"
+        fi
+    done
+    
+    # Also sync this unified script
+    curl -sL "$SCRIPTS_URL/dispatch-unified.sh" -o "$EXECUTOR_DIR/dispatch-unified.sh.new" 2>/dev/null
+    if [[ -s "$EXECUTOR_DIR/dispatch-unified.sh.new" ]]; then
+        mv "$EXECUTOR_DIR/dispatch-unified.sh.new" "$EXECUTOR_DIR/dispatch-unified.sh"
+        chmod +x "$EXECUTOR_DIR/dispatch-unified.sh"
+    else
+        rm -f "$EXECUTOR_DIR/dispatch-unified.sh.new"
+    fi
+    
+    date +%s > "$SCRIPTS_CACHE"
+    echo "   Scripts synced from GitHub"
+}
+
+# Check if sync needed (every 5 minutes)
+if [[ -f "$SCRIPTS_CACHE" ]]; then
+    LAST_SYNC=$(cat "$SCRIPTS_CACHE")
+    NOW=$(date +%s)
+    if (( NOW - LAST_SYNC > SYNC_INTERVAL )); then
+        sync_scripts
+    else
+        echo "📦 Scripts current (synced $(( (NOW - LAST_SYNC) / 60 ))m ago)"
+    fi
+else
+    sync_scripts
+fi
+echo ""
+
+# ═══════════════════════════════════════════════════════════════════
+# PRE-FLIGHT: UPDATE SHARED REPO CACHE
+# ═══════════════════════════════════════════════════════════════════
 SOURCE_REPO="$REPOS_DIR/$REPO_NAME"
 LOCKFILE="$EXECUTOR_DIR/.cache-lock-$REPO_NAME"
 
-# H3 FIX: Use flock to prevent race conditions on cache updates
 echo "📦 Pre-flight: Updating shared cache..."
 (
     flock -w 30 200 || { echo "⚠️ Could not acquire cache lock, proceeding anyway"; }
@@ -70,7 +117,6 @@ echo "📦 Pre-flight: Updating shared cache..."
     echo "   Fetching latest..."
     git fetch origin 2>&1
     
-    # C3 FIX: Detect default branch
     DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/origin/@@')
     if [[ -z "$DEFAULT_BRANCH" ]]; then
         DEFAULT_BRANCH=$(git remote show origin 2>/dev/null | grep 'HEAD branch' | awk '{print $NF}')
@@ -83,11 +129,12 @@ echo "📦 Pre-flight: Updating shared cache..."
     
 ) 200>"$LOCKFILE"
 
-# Export so child dispatchers skip their own cache update
 export OUTPOST_CACHE_READY=1
 export GITHUB_TOKEN
 
-# Count executors
+# ═══════════════════════════════════════════════════════════════════
+# DISPATCH TO AGENTS
+# ═══════════════════════════════════════════════════════════════════
 IFS=',' read -ra EXEC_ARRAY <<< "$EXECUTORS"
 EXEC_COUNT=${#EXEC_ARRAY[@]}
 
@@ -96,10 +143,9 @@ if [[ $EXEC_COUNT -gt 1 ]]; then
     echo "🔀 Parallel execution ($EXEC_COUNT agents, isolated workspaces)"
 fi
 
-# Dispatch to each executor
 PIDS=()
 for executor in "${EXEC_ARRAY[@]}"; do
-    executor=$(echo "$executor" | xargs)  # trim whitespace
+    executor=$(echo "$executor" | xargs)
     echo ""
     echo "📤 Dispatching to $executor..."
     
@@ -126,7 +172,6 @@ for executor in "${EXEC_ARRAY[@]}"; do
     esac
 done
 
-# Wait for all if parallel
 if [[ ${#PIDS[@]} -gt 0 ]]; then
     echo ""
     echo "⏳ Waiting for all agents..."
