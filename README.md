@@ -8,9 +8,9 @@ Outpost enables Claude UI sessions to dispatch coding tasks to remote servers ru
 
 | Agent | Model | Status | Dispatcher |
 |-------|-------|--------|------------|
-| Claude Code | claude-sonnet-4 | ✅ Active | `dispatch.sh` |
+| Claude Code | **claude-opus-4-5** | ✅ Active | `dispatch.sh` |
 | OpenAI Codex | gpt-5.2-codex | ✅ Active | `dispatch-codex.sh` |
-| Gemini CLI | gemini-2.5-pro | ✅ Active | `dispatch-gemini.sh` |
+| Gemini CLI | **gemini-3-pro** | ✅ Active | `dispatch-gemini.sh` |
 
 ## Architecture
 
@@ -18,7 +18,7 @@ Outpost enables Claude UI sessions to dispatch coding tasks to remote servers ru
 Claude UI (Orchestrator) → AWS SSM SendCommand
     ↓                    ↓                    ↓
 dispatch.sh      dispatch-codex.sh    dispatch-gemini.sh
-(Claude Code)    (OpenAI Codex)       (Gemini CLI)
+(Opus 4.5)       (Codex)              (Gemini 3 Pro)
     ↓                    ↓                    ↓
         Shared Infrastructure
         (repos/, runs/, git credentials)
@@ -27,7 +27,7 @@ dispatch.sh      dispatch-codex.sh    dispatch-gemini.sh
 ## Quick Start
 
 ```bash
-# Dispatch to Claude Code
+# Dispatch to Claude Code (Opus 4.5)
 aws ssm send-command \
   --instance-ids "mi-0d77bfe39f630bd5c" \
   --document-name "AWS-RunShellScript" \
@@ -36,7 +36,7 @@ aws ssm send-command \
 # Dispatch to OpenAI Codex
 aws ssm send-command ... 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-codex.sh repo-name \"task\""]'
 
-# Dispatch to Gemini CLI
+# Dispatch to Gemini CLI (Gemini 3 Pro)
 aws ssm send-command ... 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-gemini.sh repo-name \"task\""]'
 ```
 
@@ -44,26 +44,26 @@ aws ssm send-command ... 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor
 
 | Service | Monthly | Notes |
 |---------|---------|-------|
-| Claude Max | $100 | Unlimited Claude Code |
+| Claude Max | $100 | Unlimited Claude Code (Opus 4.5) |
 | ChatGPT Plus | $20 | Unlimited Codex CLI |
-| Google AI Ultra | ~$50 | Highest Gemini limits |
-| **Total** | **$170** | Three AI executors, no API charges |
+| Google AI Ultra | ~$50 | Gemini 3 Pro access |
+| **Total** | **$170** | Three top-tier AI executors |
 
 ## Documentation
 
-- [Multi-Agent Integration Guide](docs/MULTI_AGENT_INTEGRATION.md) - Complete setup and usage
-- [Outpost Soul](docs/OUTPOST_SOUL.md) - zeOS integration
+- [Multi-Agent Integration Guide](docs/MULTI_AGENT_INTEGRATION.md)
+- [Outpost Soul](docs/OUTPOST_SOUL.md)
 
 ## Scripts
 
-| Script | Purpose |
-|--------|---------|
-| `dispatch.sh` | Execute task via Claude Code |
-| `dispatch-codex.sh` | Execute task via OpenAI Codex |
-| `dispatch-gemini.sh` | Execute task via Gemini CLI |
-| `get-results.sh` | Retrieve run outputs |
-| `list-runs.sh` | List recent runs |
-| `push-changes.sh` | Commit and push approved changes |
+| Script | Agent | Model |
+|--------|-------|-------|
+| `dispatch.sh` | Claude Code | claude-opus-4-5-20251101 |
+| `dispatch-codex.sh` | OpenAI Codex | gpt-5.2-codex |
+| `dispatch-gemini.sh` | Gemini CLI | gemini-3-pro-preview |
+| `get-results.sh` | - | Retrieve outputs |
+| `list-runs.sh` | - | List runs |
+| `push-changes.sh` | - | Commit changes |
 
 ## Server
 
