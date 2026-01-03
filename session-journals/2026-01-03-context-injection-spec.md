@@ -2,45 +2,52 @@
 
 **Status:** In Progress
 **Project:** Outpost
-**Timestamp:** 2026-01-03T23:03:38Z
+**Timestamp:** 2026-01-03T23:17:34Z
 
 ---
 
-## Work Since Boot
+## Work Since Last Checkpoint
 
 ### Actions Taken
-- Drafted CONTEXT_INJECTION_SPEC.md v1.0 (~350 lines)
-- Dispatched spec to all 4 Outpost agents for review (batch 20260103-194732)
-- Received and synthesized fleet feedback
-- Created FLEET_REVIEW_SUMMARY.md consolidating all agent responses
+- Implemented all fleet recommendations into Context Injection Spec v1.0
+- Created `scripts/scrub-secrets.sh` with 15+ security patterns
+- Created `scripts/assemble-context.sh` for context building with provenance
+- Updated `dispatch-unified.sh` to v1.5.0 with `--context` flag support
+- Updated `OUTPOST_INTERFACE.md` to v1.5 with context injection docs
+- Updated `OUTPOST_SOUL.md` to v1.5
+- Updated `REGISTRY.json` with Outpost v1.5 entry
 
-### Fleet Review Results
-| Agent | Verdict |
-|-------|---------|
-| Codex (GPT-5.2) | CONCERNS - token budgets tight |
-| Gemini (Gemini 3 Pro) | APPROVAL - needs provenance |
-| Aider (DeepSeek) | APPROVAL - add debug mode |
+### Git Commits This Session
+| SHA | File | Description |
+|-----|------|-------------|
+| 6424111 | session-journals/ | Initial checkpoint |
+| 6033517 | docs/CONTEXT_INJECTION_SPEC.md | Full spec with fleet recommendations |
+| fc5abf4 | scripts/scrub-secrets.sh | Security scrubbing script |
+| 1c3ac38 | scripts/assemble-context.sh | Context assembly script |
+| 48b2662 | scripts/dispatch-unified.sh | v1.5.0 with --context flag |
+| 5afeca6 | OUTPOST_INTERFACE.md | API docs v1.5 |
+| 1727079 | OUTPOST_SOUL.md | Version bump |
+| 8f2cc1f | REGISTRY.json | Fleet registry update |
 
-### Key Feedback Consolidated
-1. **P0:** Expand security scrub patterns (ghp_, xoxb-, PEM)
-2. **P0:** Define deterministic summarization strategy
-3. **P1:** Add provenance logging (source file paths)
-4. **P1:** Add ANCHORS section for long-lived decisions
-5. **P2:** Debug mode (defer to v1.1)
-
-### Decisions Pending
-- Token budgets: 500/1000/1500 vs 600/1200/1800
-- ANCHORS section: v1.0 or v1.1
+### Fleet Recommendations Implemented
+| Recommendation | Source | Status |
+|----------------|--------|--------|
+| Token budgets 600/1200/1800 | Codex | ✅ |
+| ANCHORS section | Codex | ✅ |
+| Deterministic summarization | Codex, Gemini | ✅ |
+| Security patterns (15+) | Codex | ✅ |
+| Provenance logging | Gemini | ✅ |
+| Custom token level | Aider | ✅ |
 
 ---
 
 ## Current Focus
 
-Implementing all fleet recommendations into spec v1.0
+Providing operational rundown of Outpost v1.5
 
 ---
 
-## Git State
+## Outpost v1.5 Summary
 
-Checkpoint - no commits yet this session (spec in local draft)
+Context injection system deployed. Scripts auto-sync on next dispatch.
 
