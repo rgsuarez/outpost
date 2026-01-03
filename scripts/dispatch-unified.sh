@@ -1,8 +1,8 @@
 #!/bin/bash
-# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.1
+# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.2
 # Enables single, multiple, or all-agent execution from one command
 
-set -e
+# Don't use set -e globally - handle errors explicitly
 
 REPO_NAME="${1:-}"
 TASK="${2:-}"
@@ -24,7 +24,7 @@ if [[ -z "$REPO_NAME" || -z "$TASK" ]]; then
     echo "  claude    - Claude Code (Opus 4.5)"
     echo "  codex     - OpenAI Codex (GPT-5.2)"
     echo "  gemini    - Gemini CLI (Gemini 3 Pro)"
-    echo "  aider     - Aider (DeepSeek Coder) [NEW]"
+    echo "  aider     - Aider (DeepSeek Coder)"
     echo "  all       - All four agents in parallel"
     echo ""
     echo "Multiple agents: --executor=claude,gemini,aider"
@@ -48,7 +48,7 @@ echo "Task:       $TASK"
 echo "Executors:  $EXECUTORS"
 echo "═══════════════════════════════════════════════════════════════"
 
-# Expand "all" to full list (now includes aider)
+# Expand "all" to full list
 if [[ "$EXECUTORS" == "all" ]]; then
     EXECUTORS="claude,codex,gemini,aider"
 fi
@@ -56,7 +56,6 @@ fi
 # Track PIDs for parallel execution
 declare -a PIDS
 declare -a AGENTS
-declare -a RUN_IDS
 
 # Function to dispatch to a single agent
 dispatch_agent() {
@@ -83,7 +82,10 @@ dispatch_agent() {
     esac
     
     echo "📤 Dispatching to $agent..."
-    "$EXECUTOR_DIR/$script" "$REPO_NAME" "$TASK"
+    # Run with error capture - don't let failures propagate
+    "$EXECUTOR_DIR/$script" "$REPO_NAME" "$TASK" 2>&1 || {
+        echo "⚠️ $agent dispatch returned non-zero exit code"
+    }
 }
 
 # Split executors by comma and run
@@ -126,6 +128,6 @@ else
     echo "Succeeded:  $((${#AGENT_ARRAY[@]} - FAILED))"
     echo "Failed:     $FAILED"
     echo ""
-    echo "View results: list-runs.sh | head -${#AGENT_ARRAY[@]}"
+    echo "View results: ls -la $EXECUTOR_DIR/runs/ | tail -${#AGENT_ARRAY[@]}"
     echo "═══════════════════════════════════════════════════════════════"
 fi
