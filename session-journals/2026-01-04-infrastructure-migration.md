@@ -25,7 +25,6 @@
 ### 2. Infrastructure Analysis ✅
 - Evaluated: Lightsail, EC2, Hetzner, DigitalOcean
 - **Decision:** Lightsail medium for immediate migration
-- **Fallback:** Hetzner ($15/mo) when HTTP API built for OaaS
 - Documented in docs/OUTPOST_INFRASTRUCTURE_ANALYSIS.md
 
 ### 3. Roadmap Created ✅
@@ -38,21 +37,37 @@
 - **Static IP:** 34.195.223.189
 - **Specs:** Ubuntu 24.04, 4GB RAM, 2 vCPU, 80GB disk
 - **Cost:** $24/mo
-- **Status:** Running
+
+### 5. SSM Hybrid Activation ✅
+- **SSM Instance ID:** mi-0bbd8fed3f0650ddb
+- **Status:** Online
+- **Registration:** Successful via snap-installed agent
+- **Test command:** Verified working
 
 ---
 
 ## Migration Checklist
 
 - [x] 1. Provision Lightsail instance (outpost-prod) ✅
-- [ ] 2. Configure SSM hybrid activation ← NEXT
-- [ ] 3. Install dependencies (git, node, python, aws-cli)
+- [x] 2. Configure SSM hybrid activation ✅
+- [ ] 3. Install dependencies (git, node, python, aws-cli) ← NEXT
 - [ ] 4. Install agent CLIs (claude-code, codex, gemini, aider)
 - [ ] 5. Clone dispatch scripts from repo
 - [ ] 6. Configure .env with API keys
 - [ ] 7. Test all 4 agents
 - [ ] 8. Update SSM instance ID in docs/configs
 - [ ] 9. Clean Outpost off SOC server
+
+---
+
+## Infrastructure Summary
+
+| Resource | SOC (old) | outpost-prod (new) |
+|----------|-----------|-------------------|
+| IP | 52.44.78.2 | 34.195.223.189 |
+| SSM Instance | mi-0d77bfe39f630bd5c | **mi-0bbd8fed3f0650ddb** |
+| RAM | 4 GB (shared) | 4 GB (dedicated) |
+| Purpose | SOC game | Outpost fleet |
 
 ---
 
@@ -63,24 +78,19 @@
 | `0861acc` | Add MASTER_ROADMAP.md |
 | `8940def` | Add infrastructure analysis |
 | `154edda` | checkpoint: Pre-provisioning state |
+| `dcb4344` | checkpoint: Task 1 complete |
 
 ---
 
-## Infrastructure Created
+## Checkpoint 3
 
-| Resource | Value |
-|----------|-------|
-| Lightsail Instance | outpost-prod |
-| Static IP | 34.195.223.189 |
-| Region | us-east-1a |
-| Bundle | medium_3_0 |
-| Monthly Cost | $24 |
+**Time:** 2026-01-04T08:03:00Z
+**Status:** SSM operational on outpost-prod
+**Next:** Task 3 - Install dependencies
 
----
-
-## Checkpoint 2
-
-**Time:** 2026-01-04T06:04:00Z
-**Status:** Instance provisioned, ready for SSM activation
-**Next:** Task 2 - Configure SSM hybrid activation
+**CRITICAL UPDATE FOR CONFIGS:**
+```
+Old SSM Instance (SOC): mi-0d77bfe39f630bd5c
+New SSM Instance (Outpost): mi-0bbd8fed3f0650ddb
+```
 
