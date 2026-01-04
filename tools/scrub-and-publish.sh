@@ -93,8 +93,15 @@ scrub_content() {
     # Path generalization
     content=$(echo "$content" | sed 's|/home/ubuntu/claude-executor|${OUTPOST_DIR:-/opt/outpost}|g')
     
-    # Remove hardcoded usernames in clone URLs (but keep ${GITHUB_USER} pattern)
+    # Hardcoded GITHUB_USER assignments
+    content=$(echo "$content" | sed 's/GITHUB_USER="rgsuarez"/GITHUB_USER="${GITHUB_USER:-}"/g')
+    
+    # GitHub URLs and references
     content=$(echo "$content" | sed 's|github.com/rgsuarez/|github.com/${GITHUB_USER}/|g')
+    content=$(echo "$content" | sed 's|githubusercontent.com/rgsuarez/|githubusercontent.com/${GITHUB_USER}/|g')
+    
+    # Auto-sync URL needs to point to public repo
+    content=$(echo "$content" | sed 's|raw.githubusercontent.com/\${GITHUB_USER}/outpost|raw.githubusercontent.com/zeroechelon/outpost|g')
     
     # Remove specific instance IDs and IPs
     content=$(echo "$content" | sed 's/mi-0d77bfe39f630bd5c/${SSM_INSTANCE_ID}/g')
@@ -106,9 +113,9 @@ scrub_content() {
     content=$(echo "$content" | sed 's/535471339422/${AWS_ACCOUNT_ID}/g')
     
     # Remove any leaked credentials (paranoid check)
-    content=$(echo "$content" | sed 's/github_pat_[A-Za-z0-9_]\+/\${GITHUB_TOKEN}/g')
-    content=$(echo "$content" | sed 's/AKIA[A-Z0-9]\{16\}/\${AWS_ACCESS_KEY_ID}/g')
-    content=$(echo "$content" | sed 's/sk-ant-[A-Za-z0-9-]\+/\${ANTHROPIC_API_KEY}/g')
+    content=$(echo "$content" | sed 's/github_pat_[A-Za-z0-9_]\+/${GITHUB_TOKEN}/g')
+    content=$(echo "$content" | sed 's/AKIA[A-Z0-9]\{16\}/${AWS_ACCESS_KEY_ID}/g')
+    content=$(echo "$content" | sed 's/sk-ant-[A-Za-z0-9-]\+/${ANTHROPIC_API_KEY}/g')
     
     echo "$content"
 }
