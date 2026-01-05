@@ -27,7 +27,7 @@ Outpost is a multi-agent headless executor system that enables Claude UI to disp
                               │
                               ▼
 ┌───────────────────────────────────────────────────────────────────┐
-│                    SOC Server (52.44.78.2)                         │
+│                    outpost-prod (34.195.223.189)                         │
 │                                                                     │
 │   dispatch-unified.sh                                               │
 │        │                                                            │
@@ -61,7 +61,7 @@ Outpost is a multi-agent headless executor system that enables Claude UI to disp
 
 ```bash
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <repo> \"<task>\" --executor=<agent>"]' \
   --query 'Command.CommandId' \
@@ -73,7 +73,7 @@ aws ssm send-command \
 ```bash
 aws ssm get-command-invocation \
   --command-id "<COMMAND_ID>" \
-  --instance-id "mi-0d77bfe39f630bd5c" \
+  --instance-id "mi-0bbd8fed3f0650ddb" \
   --query 'StandardOutputContent' \
   --output text
 ```

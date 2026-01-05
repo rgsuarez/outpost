@@ -15,8 +15,8 @@ Claude UI → SSM → Outpost Server → Claude Code CLI → Results → Claude 
 
 | Component | Value |
 |-----------|-------|
-| Server | SOC Server (52.44.78.2) |
-| SSM Instance | mi-0d77bfe39f630bd5c |
+| Server | outpost-prod (34.195.223.189) |
+| SSM Instance | mi-0bbd8fed3f0650ddb |
 | Executor Path | /home/ubuntu/claude-executor/ |
 | Auth | Max subscription (token transfer) |
 | Claude Code | v2.0.76 |
@@ -75,7 +75,7 @@ Profile: richie
 Application: Outpost
 
 Purpose: Headless Claude Code executor for remote task dispatch
-Server: SOC (52.44.78.2) via SSM
+Server: outpost-prod (34.195.223.189) via SSM
 Auth: Max subscription
 Last Run: [ID and status from most recent run]
 ═══════════════════════════════════════════════════════════════

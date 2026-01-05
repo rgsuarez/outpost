@@ -41,14 +41,14 @@ Claude needs these credentials (already in richie profile preferences):
 ```
 AWS Account: 311493921645
 Region: us-east-1
-SSM Instance: mi-0d77bfe39f630bd5c
+SSM Instance: mi-0bbd8fed3f0650ddb
 ```
 
 ### Single Agent Query
 
 ```bash
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <REPO> \"<TASK>\" --executor=<AGENT>"]' \
   --query 'Command.CommandId' \
@@ -61,7 +61,7 @@ aws ssm send-command \
 
 ```bash
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <REPO> \"<TASK>\" --executor=all"]' \
   --query 'Command.CommandId' \
@@ -74,7 +74,7 @@ aws ssm send-command \
 # Wait 30-90 seconds depending on task complexity, then:
 aws ssm get-command-invocation \
   --command-id "<COMMAND_ID>" \
-  --instance-id "mi-0d77bfe39f630bd5c" \
+  --instance-id "mi-0bbd8fed3f0650ddb" \
   --query 'StandardOutputContent' \
   --output text
 ```
@@ -126,7 +126,7 @@ dispatch-unified.sh <repo> "<task>" --executor=claude --context=1400
 
 ```bash
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh swords-of-chaos-reborn \"Add PARTY command for group combat\" --executor=claude --context=standard"]' \
   --query 'Command.CommandId' \
@@ -227,7 +227,7 @@ After a successful run with changes:
 
 ```bash
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/scripts/promote-workspace.sh <RUN_ID> \"Commit message\" --push"]'
 ```
@@ -250,8 +250,8 @@ aws ssm send-command \
 
 ## Server Details
 
-- **Host:** SOC (52.44.78.2)
-- **SSM Instance:** mi-0d77bfe39f630bd5c
+- **Host:** outpost-prod (34.195.223.189)
+- **SSM Instance:** mi-0bbd8fed3f0650ddb
 - **Region:** us-east-1
 - **Executor Path:** `/home/ubuntu/claude-executor/`
 - **Environment:** `/home/ubuntu/claude-executor/.env`

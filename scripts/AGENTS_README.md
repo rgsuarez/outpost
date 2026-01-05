@@ -31,12 +31,12 @@ sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <repo> "<task>" 
 ```bash
 # Single agent
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh zeOS \"review this code\" --executor=claude"]'
 
 # All agents
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh zeOS \"review this code\" --executor=all"]'
 ```
 

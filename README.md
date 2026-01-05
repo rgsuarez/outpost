@@ -36,7 +36,7 @@ Claude UI (Orchestrator) → AWS SSM SendCommand
 ### Single Agent
 ```bash
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <repo> \"<task>\" --executor=claude"]'
 ```
@@ -44,7 +44,7 @@ aws ssm send-command \
 ### All Agents (Parallel)
 ```bash
 aws ssm send-command \
-  --instance-ids "mi-0d77bfe39f630bd5c" \
+  --instance-ids "mi-0bbd8fed3f0650ddb" \
   --document-name "AWS-RunShellScript" \
   --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <repo> \"<task>\" --executor=all"]'
 ```
@@ -73,8 +73,8 @@ aws ssm send-command \
 
 ## Server Details
 
-- **Host:** SOC (52.44.78.2)
-- **SSM Instance:** mi-0d77bfe39f630bd5c
+- **Host:** outpost-prod (34.195.223.189)
+- **SSM Instance:** mi-0bbd8fed3f0650ddb
 - **Executor Path:** `/home/ubuntu/claude-executor/`
 
 ---
