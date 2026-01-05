@@ -16,7 +16,7 @@ Outpost enables Claude sessions to dispatch coding tasks to remote AI agents. Fi
 | OpenAI Codex | gpt-5.2-codex | $20/mo |
 | Gemini CLI | gemini-3-pro-preview | $50/mo |
 | Aider | deepseek/deepseek-coder | ~$0.14/MTok |
-| Grok | grok-3 (xAI) | API |
+| Grok | grok-4-1-fast-reasoning (xAI) | API |
 
 ## Architecture
 

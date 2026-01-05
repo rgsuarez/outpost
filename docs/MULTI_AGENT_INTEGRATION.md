@@ -4,7 +4,7 @@
 
 Outpost is a multi-agent headless executor system that enables Claude UI to dispatch coding tasks to remote servers running multiple AI coding agents in parallel.
 
-**Fleet Status:** OPERATIONAL (4/4 agents)
+**Fleet Status:** OPERATIONAL (5/5 agents)
 
 | Agent | Model | Status | Auth Method |
 |-------|-------|--------|-------------|
@@ -12,6 +12,7 @@ Outpost is a multi-agent headless executor system that enables Claude UI to disp
 | OpenAI Codex | gpt-5.2-codex | ✅ Active | ChatGPT Plus subscription ($20/mo) |
 | Gemini CLI | gemini-3-pro-preview | ✅ Active | Gemini AI Ultra subscription ($50/mo) |
 | Aider | deepseek/deepseek-coder | ✅ Active | DeepSeek API (~$0.14/MTok) |
+| Grok | grok-4-1-fast-reasoning | ✅ Active | xAI API |
 
 ---
 
@@ -34,7 +35,8 @@ Outpost is a multi-agent headless executor system that enables Claude UI to disp
 │        ├─→ dispatch.sh        → Claude Code (Opus 4.5)             │
 │        ├─→ dispatch-codex.sh  → OpenAI Codex (GPT-5.2)             │
 │        ├─→ dispatch-gemini.sh → Gemini CLI (Gemini 3 Pro)          │
-│        └─→ dispatch-aider.sh  → Aider (DeepSeek Coder)             │
+│        ├─→ dispatch-aider.sh  → Aider (DeepSeek Coder)             │
+│        └─→ dispatch-grok.sh   → Grok (xAI grok-4-1-fast-reasoning) │
 │                                                                     │
 │   Each agent runs in isolated workspace (true parallelism)          │
 └───────────────────────────────────────────────────────────────────┘
@@ -51,7 +53,8 @@ Outpost is a multi-agent headless executor system that enables Claude UI to disp
 | Documentation | `--executor=gemini` | Strong at prose and analysis |
 | High-volume tasks | `--executor=aider` | Cheapest per-token cost |
 | Second opinion | `--executor=claude,codex` | Compare approaches |
-| Consensus/review | `--executor=all` | Four perspectives |
+| Contrarian review | `--executor=grok` | Risk analysis, unfiltered feedback |
+| Consensus/review | `--executor=all` | Five perspectives |
 
 ---
 
@@ -100,4 +103,4 @@ aws ssm get-command-invocation \
 
 ---
 
-*Outpost v1.4 Multi-Agent Integration Guide*
+*Outpost v1.8 Multi-Agent Integration Guide*

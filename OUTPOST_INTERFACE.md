@@ -1,6 +1,6 @@
 # Outpost Interface Specification v1.5
 
-> **v1.5 Features:** Context injection system for continuity-aware agent execution
+> **v1.8 Features:** Context injection system for continuity-aware agent execution
 
 > **Cross-Project API Contract for Multi-Agent Dispatch**
 
@@ -55,7 +55,7 @@ aws ssm send-command \
   --output text
 ```
 
-**Agents:** `claude` | `codex` | `gemini` | `aider`
+**Agents:** `claude` | `codex` | `gemini` | `aider` | `grok`
 
 ### All Agents (Parallel)
 
@@ -169,9 +169,10 @@ Each run with context generates `context.json` with provenance:
 | `codex` | gpt-5.2-codex | $20/mo | Code generation, refactoring, test writing |
 | `gemini` | gemini-3-pro-preview | $50/mo | Analysis, documentation, broad context |
 | `aider` | deepseek/deepseek-coder | ~$0.14/MTok | Low-cost, high-quality code, iterative editing |
+| `grok` | grok-4-1-fast-reasoning | API | Risk analysis, contrarian review, fast reasoning |
 
 **Subscription Agents:** $170/mo total (claude + codex + gemini)
-**API Agent:** Aider uses DeepSeek API (pay-per-use, extremely cheap)
+**API Agents:** Aider (DeepSeek), Grok (xAI) - pay-per-use
 
 ---
 
@@ -260,7 +261,7 @@ aws ssm send-command \
 
 ## Version
 
-**Outpost v1.5.0** — Context injection system
+**Outpost v1.8.0** — Context injection system
 
 ### Changelog
 - v1.0: Initial release (3 agents: Claude, Codex, Gemini)
@@ -268,7 +269,9 @@ aws ssm send-command \
 - v1.2: Added explicit invocation constraints, error documentation
 - v1.3: Workspace isolation for true parallelism
 - v1.4: Security hardening, timeout, race-safe caching, dynamic branches
-- v1.5: **Context injection system** (--context flag, ANCHORS section, provenance logging)
+- v1.5: Context injection system (--context flag, ANCHORS section, provenance logging)
+- v1.7: S3 large output support, INVOKE.md landing page
+- v1.8: **Added Grok agent** (xAI grok-4-1-fast-reasoning model)
 
 ---
 
