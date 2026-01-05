@@ -192,7 +192,8 @@ aws ssm send-command --profile soc \
 | Codex | Code generation, refactoring | $20/mo |
 | Gemini | Analysis, documentation | $50/mo |
 | Aider | Iterative editing, low-cost tasks | ~$0.14/MTok |
+| Grok | Risk analysis, contrarian review | API |
 
 ---
 
-*Outpost v1.7.0 — Read OUTPOST_INTERFACE.md for full API spec*
+*Outpost v1.8.0 — Read OUTPOST_INTERFACE.md for full API spec*

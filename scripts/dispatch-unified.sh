@@ -1,7 +1,7 @@
 #!/bin/bash
 # Source environment if available
 [[ -f /home/ubuntu/claude-executor/.env ]] && source /home/ubuntu/claude-executor/.env
-# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.5.0
+# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.8.0
 # WORKSPACE ISOLATION: Each agent gets its own repo copy - true parallelism
 # v1.5.0: Context injection support (--context flag)
 
@@ -51,7 +51,7 @@ done
 if [[ -z "$REPO_NAME" || -z "$TASK" ]]; then
     echo "Usage: dispatch-unified.sh <repo-name> \"<task>\" [--executor=<agent(s)>] [--context=<level>]"
     echo ""
-    echo "Executors: claude | codex | gemini | aider | all"
+    echo "Executors: claude | codex | gemini | aider | grok | all"
     echo "Multiple:  --executor=claude,codex"
     echo ""
     echo "Context Injection (v1.5.0):"
@@ -69,7 +69,7 @@ if [[ -z "$GITHUB_TOKEN" ]]; then
 fi
 
 if [[ "$EXECUTORS" == "all" ]]; then
-    EXECUTORS="claude,codex,gemini,aider"
+    EXECUTORS="claude,codex,gemini,aider,grok"
 fi
 
 EXECUTOR_DIR="/home/ubuntu/claude-executor"
@@ -101,7 +101,7 @@ sync_scripts() {
     local SCRIPTS_URL="https://raw.githubusercontent.com/rgsuarez/outpost/main/scripts"
     
     # Sync main dispatch scripts
-    for script in dispatch.sh dispatch-codex.sh dispatch-gemini.sh dispatch-aider.sh; do
+    for script in dispatch.sh dispatch-codex.sh dispatch-gemini.sh dispatch-aider.sh dispatch-grok.sh; do
         curl -sL "$SCRIPTS_URL/$script" -o "$EXECUTOR_DIR/$script.new" 2>/dev/null
         if [[ -s "$EXECUTOR_DIR/$script.new" ]]; then
             mv "$EXECUTOR_DIR/$script.new" "$EXECUTOR_DIR/$script"
@@ -122,7 +122,7 @@ sync_scripts() {
     
     # Sync context injection scripts (v1.5.0)
     mkdir -p "$SCRIPTS_DIR"
-    for script in assemble-context.sh scrub-secrets.sh; do
+    for script in assemble-context.sh scrub-secrets.sh grok-agent.py; do
         curl -sL "$SCRIPTS_URL/$script" -o "$SCRIPTS_DIR/$script.new" 2>/dev/null
         if [[ -s "$SCRIPTS_DIR/$script.new" ]]; then
             mv "$SCRIPTS_DIR/$script.new" "$SCRIPTS_DIR/$script"
@@ -260,6 +260,10 @@ for executor in "${EXEC_ARRAY[@]}"; do
             ;;
         aider)
             "$EXECUTOR_DIR/dispatch-aider.sh" "$REPO_NAME" "$ENHANCED_TASK" &
+            PIDS+=($!)
+            ;;
+        grok)
+            "$EXECUTOR_DIR/dispatch-grok.sh" "$REPO_NAME" "$ENHANCED_TASK" &
             PIDS+=($!)
             ;;
         *)

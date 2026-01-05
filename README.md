@@ -1,8 +1,8 @@
 # Outpost
 
-**Multi-Agent Headless Executor System v1.7.0**
+**Multi-Agent Headless Executor System v1.8.0**
 
-Outpost enables Claude sessions to dispatch coding tasks to remote AI agents. Four agents run in parallel on dedicated infrastructure.
+Outpost enables Claude sessions to dispatch coding tasks to remote AI agents. Five agents run in parallel on dedicated infrastructure.
 
 ## Quick Invoke
 
@@ -16,6 +16,7 @@ Outpost enables Claude sessions to dispatch coding tasks to remote AI agents. Fo
 | OpenAI Codex | gpt-5.2-codex | $20/mo |
 | Gemini CLI | gemini-3-pro-preview | $50/mo |
 | Aider | deepseek/deepseek-coder | ~$0.14/MTok |
+| Grok | grok-3 (xAI) | API |
 
 ## Architecture
 
@@ -26,6 +27,7 @@ Orchestrator -> AWS SSM -> dispatch-unified.sh
                               +-> OpenAI Codex
                               +-> Gemini CLI
                               +-> Aider
+                              +-> Grok
                                    |
                                    +-> Isolated workspace
 ```
@@ -54,4 +56,4 @@ Orchestrator -> AWS SSM -> dispatch-unified.sh
 
 ---
 
-*Outpost v1.7.0 - Multi-Agent Headless Executor*
+*Outpost v1.8.0 - Multi-Agent Headless Executor*
