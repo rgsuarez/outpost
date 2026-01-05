@@ -1,82 +1,57 @@
 # Outpost
 
-**Multi-Agent Headless Executor System v1.4**
+**Multi-Agent Headless Executor System v1.6.0**
 
-Outpost enables Claude UI sessions to dispatch coding tasks to remote servers running multiple AI coding agents in parallel.
+Outpost enables Claude sessions to dispatch coding tasks to remote AI agents. Four agents run in parallel on dedicated infrastructure.
 
-## Fleet Status
+## Quick Invoke
 
-| Agent | Model | Status | Dispatcher |
-|-------|-------|--------|------------|
-| Claude Code | claude-opus-4-5-20251101 | ✅ Active | `dispatch.sh` |
-| OpenAI Codex | gpt-5.2-codex | ✅ Active | `dispatch-codex.sh` |
-| Gemini CLI | gemini-3-pro-preview | ✅ Active | `dispatch-gemini.sh` |
-| Aider | deepseek/deepseek-coder | ✅ Active | `dispatch-aider.sh` |
+**Read [INVOKE.md](INVOKE.md) for copy-paste commands.**
 
-**Subscription Total:** $170/mo (Claude Max + ChatGPT Plus + Gemini AI Ultra)  
-**API Agent:** Aider uses DeepSeek API (~$0.14/MTok)
+## Fleet
+
+| Agent | Model | Cost |
+|-------|-------|------|
+| Claude Code | claude-opus-4-5-20251101 | $100/mo |
+| OpenAI Codex | gpt-5.2-codex | $20/mo |
+| Gemini CLI | gemini-3-pro-preview | $50/mo |
+| Aider | deepseek/deepseek-coder | ~$0.14/MTok |
 
 ## Architecture
 
 ```
-Claude UI (Orchestrator) → AWS SSM SendCommand
-    │
-    └─→ dispatch-unified.sh
-         │
-         ├─→ dispatch.sh       (Claude Code)
-         ├─→ dispatch-codex.sh (OpenAI Codex)
-         ├─→ dispatch-gemini.sh(Gemini CLI)
-         └─→ dispatch-aider.sh (Aider)
-              │
-              └─→ Isolated workspace per agent
+Orchestrator -> AWS SSM -> dispatch-unified.sh
+                              |
+                              +-> Claude Code
+                              +-> OpenAI Codex
+                              +-> Gemini CLI
+                              +-> Aider
+                                   |
+                                   +-> Isolated workspace
 ```
 
-## Quick Start
+## Features (v1.5+)
 
-### Single Agent
-```bash
-aws ssm send-command \
-  --instance-ids "mi-0bbd8fed3f0650ddb" \
-  --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <repo> \"<task>\" --executor=claude"]'
-```
-
-### All Agents (Parallel)
-```bash
-aws ssm send-command \
-  --instance-ids "mi-0bbd8fed3f0650ddb" \
-  --document-name "AWS-RunShellScript" \
-  --parameters 'commands=["sudo -u ubuntu /home/ubuntu/claude-executor/dispatch-unified.sh <repo> \"<task>\" --executor=all"]'
-```
-
-## v1.4 Features
-
-- **Security:** GitHub token from environment (no hardcoding)
-- **Timeout Protection:** 10-minute default agent timeout
-- **Race-Safe:** flock prevents cache corruption on parallel dispatch
-- **Dynamic Branches:** Auto-detects default branch (main/master/etc)
-- **Running Status:** Immediate status:running in summary.json
-- **Workspace Promotion:** `promote-workspace.sh` for pushing changes
-
-## Helper Scripts
-
-| Script | Purpose |
-|--------|---------|
-| `scripts/list-runs.sh` | List recent runs with status |
-| `scripts/get-results.sh` | Retrieve run artifacts |
-| `scripts/promote-workspace.sh` | Push workspace changes to origin |
+- **Context Injection:** `--context` flag prepends zeOS knowledge
+- **ANCHORS Section:** Long-lived decisions protected from summarization
+- **Security Scrubbing:** 15+ patterns for credential redaction
+- **Workspace Isolation:** True parallelism with per-run workspaces
 
 ## Documentation
 
-- [OUTPOST_INTERFACE.md](OUTPOST_INTERFACE.md) - Full API specification
-- [docs/MULTI_AGENT_INTEGRATION.md](docs/MULTI_AGENT_INTEGRATION.md) - Integration guide
+| File | Purpose |
+|------|---------|
+| [INVOKE.md](INVOKE.md) | **Landing file - copy-paste commands** |
+| [OUTPOST_INTERFACE.md](OUTPOST_INTERFACE.md) | Full API specification |
+| [docs/MULTI_AGENT_INTEGRATION.md](docs/MULTI_AGENT_INTEGRATION.md) | Integration guide |
 
-## Server Details
+## Server
 
 - **Host:** outpost-prod (34.195.223.189)
 - **SSM Instance:** mi-0bbd8fed3f0650ddb
-- **Executor Path:** `/home/ubuntu/claude-executor/`
+- **Region:** us-east-1
+- **Profile:** soc
 
 ---
 
-*Outpost v1.4 - Multi-Agent Headless Executor*
+*Outpost v1.6.0 - Multi-Agent Headless Executor*
