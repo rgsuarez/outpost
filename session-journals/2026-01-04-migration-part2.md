@@ -162,3 +162,51 @@ Task 7: Test all 4 agents on outpost-prod
 |--------|----|--------------| -------|
 | outpost-prod | 34.195.223.189 | mi-0bbd8fed3f0650ddb | Fully configured, ready for testing |
 | SOC (old) | 52.44.78.2 | mi-0d77bfe39f630bd5c | Still active, pending cleanup |
+
+---
+type: checkpoint
+timestamp: 2026-01-05T04:20:00Z
+note: "Task 7 complete - agent testing with fixes"
+---
+
+## Work Since Last Save
+
+### Actions Taken
+- Tested all 4 agents on outpost-prod via dispatch scripts
+- Fixed Aider path: `/home/ubuntu/.local/bin/aider` (was `/home/ubuntu/aider-env/bin/aider`)
+- Copied Gemini OAuth credentials from SOC to outpost-prod
+- Identified Claude/Codex/Gemini require interactive OAuth login
+
+### Test Results
+| Agent | Status | Issue |
+|-------|--------|-------|
+| Aider | PASS | Working after path fix |
+| Claude | FAIL | OAuth login required |
+| Codex | FAIL | OAuth login required |
+| Gemini | FAIL | OAuth token invalid/expired |
+
+### Root Causes
+- **Aider**: dispatch-aider.sh had wrong AIDER_ENV path (SOC uses virtualenv, outpost-prod uses pipx)
+- **Claude/Codex/Gemini**: These CLIs use OAuth subscription auth, not API keys. Require interactive `login` command.
+
+### Fixes Applied
+1. Updated AIDER_ENV from `/home/ubuntu/aider-env/bin` to `/home/ubuntu/.local/bin`
+2. Created `/home/ubuntu/.gemini/oauth_creds.json` with SOC OAuth tokens
+
+### Remaining Work (Requires SSH)
+To complete agent auth, SSH to outpost-prod (34.195.223.189):
+```bash
+ssh ubuntu@34.195.223.189
+claude login
+codex login
+gemini auth login
+```
+
+### Current Focus
+Next session: SSH to outpost-prod, complete OAuth logins, retest
+
+### Infrastructure State
+| Server | IP | SSM Instance | Status |
+|--------|----|--------------| -------|
+| outpost-prod | 34.195.223.189 | mi-0bbd8fed3f0650ddb | Aider working, 3 agents need OAuth login |
+| SOC (old) | 52.44.78.2 | mi-0d77bfe39f630bd5c | Still active, pending cleanup |
