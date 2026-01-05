@@ -133,32 +133,32 @@ aws ssm send-command --profile soc --instance-ids "mi-0bbd8fed3f0650ddb" \
 Task 6: Configure .env with API keys
 
 ---
-type: session-end
-timestamp: 2026-01-05T02:00:00Z
+type: checkpoint
+timestamp: 2026-01-05T03:30:00Z
+note: "Task 6 complete - .env configured with API keys"
 ---
 
-## Session Summary
+## Work Since Last Save
 
-**Progress:** 5/9 migration tasks complete (56%)
+### Actions Taken
+- Retrieved .env from SOC server (mi-0d77bfe39f630bd5c)
+- Created matching .env on outpost-prod (mi-0bbd8fed3f0650ddb)
+- Set proper ownership (ubuntu:ubuntu) and permissions (600)
+- Verified all 4 API keys present
 
-### Completed This Session
-- Task 3: Dependencies verified (Gemini) + journal fixed to zeOS standards
-- Task 4: All 4 agent CLIs installed (claude, codex, gemini, aider)
-- Task 5: Dispatch scripts cloned and structured
+### .env Contents
+| Variable | Purpose |
+|----------|---------|
+| GITHUB_TOKEN | Repository access for cloning |
+| AGENT_TIMEOUT | 600 seconds per agent execution |
+| DEEPSEEK_API_KEY | Aider backend API |
+| ANTHROPIC_API_KEY | Claude Code API |
 
-### Also This Session
-- Diagnosed Gemini journal compliance failure
-- Designed ZEOS_MODULE_004 (Journal Schema) fix for zeOS-level enforcement
-- Provided instruction set for zeOS-dev implementation
-
-### Remaining Tasks
-- Task 6: Configure .env with API keys
-- Task 7: Test all 4 agents
-- Task 8: Update SSM instance ID in docs (cutover)
-- Task 9: Clean Outpost off SOC
+### Current Focus
+Task 7: Test all 4 agents on outpost-prod
 
 ### Infrastructure State
 | Server | IP | SSM Instance | Status |
 |--------|----|--------------| -------|
-| outpost-prod | 34.195.223.189 | mi-0bbd8fed3f0650ddb | CLIs + scripts ready, needs .env |
+| outpost-prod | 34.195.223.189 | mi-0bbd8fed3f0650ddb | Fully configured, ready for testing |
 | SOC (old) | 52.44.78.2 | mi-0d77bfe39f630bd5c | Still active, pending cleanup |
