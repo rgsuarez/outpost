@@ -100,4 +100,79 @@ Fleet consensus: **BYOK (Bring Your Own Keys)** for MVP
 
 ---
 
-*Outpost v2.0 Multi-Tenant Planning — Checkpoint*
+## Checkpoint 2: Blueprint Activated
+
+### 7. Workspace Artifacts Analyzed
+
+Retrieved and analyzed docs from Grok and Aider workspaces:
+- **Grok:** Serverless-first, DynamoDB, EFS for workspaces, 4-6 week timeline
+- **Aider:** Comprehensive 4-phase migration, specific DynamoDB schema, Docker worker spec
+
+### 8. Consolidated Specification Created
+
+**File:** `docs/OUTPOST_V2_SAAS_SPEC.md`
+- Merged fleet consensus into unified requirements document
+- BYOK billing model defined
+- API specification with endpoints
+- Cost estimates by scale
+- Security requirements
+
+### 9. Official Blueprint Generated
+
+**Command:** `--executor=claude --context --depth 2`
+**File:** `blueprints/OUTPOST_V2_MULTI_TENANT_SAAS.md` (30.2 KB)
+
+**Structure:**
+| Tier | Name | Tasks |
+|------|------|-------|
+| T0 | Foundation — Infrastructure & Data Models | 4 |
+| T1 | Authentication & Authorization Layer | 4 |
+| T2 | Job Processing & Scaling Layer | 5 |
+
+**Critical Path:** `T0.1 → T0.3 → T0.4 → T1.1 → T2.2 → T2.4`
+
+**Metadata Verified:**
+```
+<!-- _blueprint_version: 2.0.1 -->
+<!-- _generated_at: 2026-01-08T07:32:00Z -->
+<!-- _generator: outpost.claude-opus -->
+<!-- _depth: 2 -->
+```
+
+### 10. Blueprint Activated
+
+Updated `OUTPOST_SOUL.md` with:
+```yaml
+active_blueprint: "blueprints/OUTPOST_V2_MULTI_TENANT_SAAS.md"
+```
+
+---
+
+## Files Modified
+
+| File | Action | Location |
+|------|--------|----------|
+| `docs/OUTPOST_V2_SAAS_SPEC.md` | Created | outpost repo |
+| `blueprints/OUTPOST_V2_MULTI_TENANT_SAAS.md` | Created | outpost repo |
+| `session-journals/2026-01-08-multi-tenant-architecture.md` | Created | outpost repo |
+| `apps/outpost/OUTPOST_SOUL.md` | Modified | zeOS repo |
+
+---
+
+## Git Commits
+
+1. `5b76a75` - docs: Add session journal for multi-tenant architecture consultation
+2. `4daefec` - feat: Add Outpost v2.0 multi-tenant SaaS specification and blueprint
+3. `1d00572` - feat(outpost): Activate v2.0 multi-tenant SaaS blueprint (zeOS)
+
+---
+
+## Next Steps
+
+1. Execute Blueprint T0.1: DynamoDB Schema Design
+2. Review BYOK billing model implementation details
+3. Set up development environment for multi-tenant work
+
+---
+
+*Outpost v2.0 Multi-Tenant Planning — Blueprint Activated*
