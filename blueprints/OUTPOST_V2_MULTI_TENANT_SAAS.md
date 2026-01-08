@@ -1127,8 +1127,8 @@ notes: |
 ```yaml
 task_id: T3.1
 name: "Implement Stripe client for subscription management"
-status: not_started
-assignee: null
+status: completed
+assignee: "Claude"
 estimated_sessions: 2
 dependencies: [T0.3]
 
@@ -1198,8 +1198,8 @@ notes: |
 ```yaml
 task_id: T3.2
 name: "Implement usage metering logic"
-status: not_started
-assignee: null
+status: completed
+assignee: "Claude"
 estimated_sessions: 2
 dependencies: [T2.4, T3.1]
 
@@ -1270,8 +1270,8 @@ notes: |
 ```yaml
 task_id: T3.3
 name: "Implement Stripe webhook handler"
-status: not_started
-assignee: null
+status: completed
+assignee: "Claude"
 estimated_sessions: 2
 dependencies: [T3.1, T3.2]
 
@@ -1337,8 +1337,8 @@ notes: |
 ```yaml
 task_id: T3.4
 name: "Implement Billing Portal API"
-status: not_started
-assignee: null
+status: completed
+assignee: "Claude"
 estimated_sessions: 1
 dependencies: [T3.1]
 
