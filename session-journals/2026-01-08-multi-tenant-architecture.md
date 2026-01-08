@@ -4,6 +4,7 @@
 **Project:** Outpost
 **Version:** v1.8 → v2.0 Planning
 **Session Type:** Architecture
+**Status:** COMPLETE
 
 ---
 
@@ -175,4 +176,20 @@ active_blueprint: "blueprints/OUTPOST_V2_MULTI_TENANT_SAAS.md"
 
 ---
 
-*Outpost v2.0 Multi-Tenant Planning — Blueprint Activated*
+## Next Action Primer
+
+**For next session:**
+1. Begin Blueprint execution with T0.1 (DynamoDB Schema Design)
+2. Blueprint path: `blueprints/OUTPOST_V2_MULTI_TENANT_SAAS.md`
+3. Use `!blueprint:status` to see current progress
+4. Critical path: T0.1 → T0.3 → T0.4 → T1.1 → T2.2 → T2.4
+
+**Key decisions locked:**
+- BYOK billing model (users bring own API keys)
+- API Gateway + SQS + Fargate architecture
+- DynamoDB for metadata/audit
+- 4-6 week implementation timeline
+
+---
+
+*Outpost v2.0 Multi-Tenant Planning — Session Complete*
