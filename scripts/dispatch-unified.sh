@@ -3,9 +3,11 @@
 [[ -f /home/ubuntu/claude-executor/.env ]] && source /home/ubuntu/claude-executor/.env
 
 # AUTO-PRIVILEGE DROP: Ensure execution as ubuntu user
+# NOTE: Don't use 'exec' here - it breaks background job context for run_with_capture
 if [[ $EUID -eq 0 ]]; then
     echo "🔒 Auto-dropping privileges from root to ubuntu user..."
-    exec sudo -u ubuntu -E HOME=/home/ubuntu bash "$0" "$@"
+    sudo -u ubuntu -E HOME=/home/ubuntu bash "$0" "$@"
+    exit $?
 fi
 
 # dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.8.0
