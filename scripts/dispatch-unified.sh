@@ -1,6 +1,13 @@
 #!/bin/bash
 # Source environment if available
 [[ -f /home/ubuntu/claude-executor/.env ]] && source /home/ubuntu/claude-executor/.env
+
+# AUTO-PRIVILEGE DROP: Ensure execution as ubuntu user
+if [[ $EUID -eq 0 ]]; then
+    echo "🔒 Auto-dropping privileges from root to ubuntu user..."
+    exec sudo -u ubuntu -E HOME=/home/ubuntu bash "$0" "$@"
+fi
+
 # dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.8.0
 # WORKSPACE ISOLATION: Each agent gets its own repo copy - true parallelism
 # v1.5.0: Context injection support (--context flag)
