@@ -447,7 +447,12 @@ run_with_capture() {
     local log_file="$1"
     local status_file="$2"
     shift 2
-    bash -c 'set -o pipefail; "$@" 2>&1 | tee "$0"; echo ${PIPESTATUS[0]} > "$1"' "$log_file" "$status_file" "$@"
+    # Run command, tee output to log, capture exit code directly
+    set -o pipefail
+    "$@" 2>&1 | tee "$log_file"
+    local exit_code=$?
+    echo "$exit_code" > "$status_file"
+    return $exit_code
 }
 
 PIDS=()
