@@ -462,6 +462,8 @@ for executor in "${EXEC_ARRAY[@]}"; do
 
     log_file="$(mktemp "/tmp/outpost-${BATCH_ID}-${executor}.log.XXXXXX")"
     status_file="$(mktemp "/tmp/outpost-${BATCH_ID}-${executor}.status.XXXXXX")"
+    # Make temp files writable by subprocesses (fix permission denied in bash -c context)
+    chmod 644 "$log_file" "$status_file" 2>/dev/null || true
 
     case "$executor" in
         claude)
