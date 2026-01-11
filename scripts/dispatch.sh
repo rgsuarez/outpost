@@ -8,15 +8,40 @@ if [[ $EUID -eq 0 ]]; then
     exec sudo -u ubuntu -E HOME=/home/ubuntu bash "$0" "$@"
 fi
 
-# dispatch.sh - Headless Claude Code executor for Outpost v1.4
+# dispatch.sh - Headless Claude Code executor for Outpost v1.6
 # WORKSPACE ISOLATION: Each run gets its own repo copy
-# v1.4: Security hardening, dynamic branch detection, timeout protection
+# v1.6: Namespace stripping support (rgsuarez/repo → repo)
+# v1.5: Stack Lock enforcement, --stack-override, --repo-url support
+#
+# Test cases for namespace stripping:
+#   ./dispatch.sh "awsaudit" "task"           → awsaudit (unchanged)
+#   ./dispatch.sh "rgsuarez/awsaudit" "task"  → awsaudit (namespace stripped)
+#   ./dispatch.sh "org/ns/repo" "task"        → repo (all namespaces stripped)
 
-REPO_NAME="${1:-}"
-TASK="${2:-}"
+# Argument parsing for optional flags
+REPO_NAME=""
+TASK=""
+REPO_URL=""
+STACK_OVERRIDE=""
+
+while [[ "$#" -gt 0 ]]; do
+    case $1 in
+        --repo-url=*) REPO_URL="${1#*=}"; shift ;;
+        --stack-override=*) STACK_OVERRIDE="${1#*=}"; shift ;;
+        *) if [[ -z "$REPO_NAME" ]]; then REPO_NAME="$1"; elif [[ -z "$TASK" ]]; then TASK="$1"; fi; shift ;;
+    esac
+done
+
+# Strip GitHub username prefix if present (e.g., "rgsuarez/awsaudit" → "awsaudit")
+# Supports both bare names and namespaced names for external API compatibility
+if [[ "$REPO_NAME" == */* ]]; then
+    ORIGINAL_REPO_NAME="$REPO_NAME"
+    REPO_NAME="${REPO_NAME##*/}"
+    echo "📝 Stripped namespace: $ORIGINAL_REPO_NAME → $REPO_NAME"
+fi
 
 if [[ -z "$REPO_NAME" || -z "$TASK" ]]; then
-    echo "Usage: dispatch.sh <repo-name> \"<task>\""
+    echo "Usage: dispatch.sh <repo-name> \"<task>\" [--repo-url=<url>] [--stack-override=<stack>]"
     exit 1
 fi
 
@@ -67,7 +92,10 @@ if [[ -z "$OUTPOST_CACHE_READY" ]]; then
     if [[ ! -d "$SOURCE_REPO" ]]; then
         echo "📦 Initial clone from GitHub..."
         mkdir -p "$REPOS_DIR"
-        if ! git clone "https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${REPO_NAME}.git" "$SOURCE_REPO" 2>&1; then
+        CLONE_URL="https://${GITHUB_USER}:${GITHUB_TOKEN}@github.com/${GITHUB_USER}/${REPO_NAME}.git"
+        [[ -n "$REPO_URL" ]] && CLONE_URL="$REPO_URL"
+        
+        if ! git clone "$CLONE_URL" "$SOURCE_REPO" 2>&1; then
             echo "❌ Git clone failed"
             cat > "$RUN_DIR/summary.json" << SUMMARY
 {"run_id":"$RUN_ID","repo":"$REPO_NAME","executor":"claude-code","status":"failed","error":"git clone failed"}
@@ -98,6 +126,31 @@ mkdir -p "$WORKSPACE"
 rsync -a --delete "$SOURCE_REPO/" "$WORKSPACE/"
 
 cd "$WORKSPACE"
+
+# --- STACK LOCK ENFORCEMENT (v1.5) ---
+echo "🔍 Detecting stack..."
+if [[ -n "$STACK_OVERRIDE" ]]; then
+    DETECTED_STACK="$STACK_OVERRIDE"
+    echo "Using stack override: $DETECTED_STACK"
+else
+    # Ensure blueprint package is available in PYTHONPATH
+    # On Outpost, we expect blueprint source in /home/ubuntu/blueprint
+    BLUEPRINT_LIB="/home/ubuntu/blueprint/src"
+    if [[ -d "$BLUEPRINT_LIB" ]]; then
+        DETECTED_STACK=$(PYTHONPATH="$BLUEPRINT_LIB" python3 -c "from blueprint.stack.detector import detect_stack; print(detect_stack('.')['primary_stack'])" 2>/dev/null || echo "unknown")
+    else
+        DETECTED_STACK="unknown"
+    fi
+    echo "Detected stack: $DETECTED_STACK"
+fi
+
+if [[ "$DETECTED_STACK" != "unknown" ]]; then
+    LANGUAGE_LOCK="LANGUAGE_LOCK: This is a $DETECTED_STACK project. ALL code solutions MUST use $DETECTED_STACK. DO NOT suggest other language alternatives."
+    TASK=$(printf "$LANGUAGE_LOCK\n\n$TASK")
+    echo "Stack lock applied: $DETECTED_STACK"
+fi
+# -------------------------------------
+
 BEFORE_SHA=$(git rev-parse HEAD 2>/dev/null || echo "unknown")
 echo "Workspace SHA: $BEFORE_SHA"
 
@@ -147,4 +200,3 @@ echo "Run ID: $RUN_ID"
 echo "Status: $STATUS"
 echo "Changes: $CHANGES"
 echo "Workspace: $WORKSPACE"
-

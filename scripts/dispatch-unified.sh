@@ -10,8 +10,9 @@ if [[ $EUID -eq 0 ]]; then
     exit $?
 fi
 
-# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.8.0
+# dispatch-unified.sh - Unified multi-agent dispatcher for Outpost v1.9.0
 # WORKSPACE ISOLATION: Each agent gets its own repo copy - true parallelism
+# v1.9.0: Namespace stripping support (rgsuarez/repo → repo)
 # v1.5.0: Context injection support (--context flag)
 
 # ═══════════════════════════════════════════════════════════════════
@@ -20,6 +21,14 @@ fi
 REPO_NAME="${1:-}"
 TASK="${2:-}"
 shift 2 2>/dev/null || true
+
+# Strip GitHub username prefix if present (e.g., "rgsuarez/awsaudit" → "awsaudit")
+# Supports both bare names and namespaced names for external API compatibility
+if [[ "$REPO_NAME" == */* ]]; then
+    ORIGINAL_REPO_NAME="$REPO_NAME"
+    REPO_NAME="${REPO_NAME##*/}"
+    echo "📝 Stripped namespace: $ORIGINAL_REPO_NAME → $REPO_NAME"
+fi
 
 # Defaults
 EXECUTORS="claude"

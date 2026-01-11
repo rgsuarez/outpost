@@ -8,12 +8,21 @@ if [[ $EUID -eq 0 ]]; then
     exec sudo -u ubuntu -E HOME=/home/ubuntu bash "$0" "$@"
 fi
 
-# dispatch-grok.sh - Headless Grok executor for Outpost v1.8
+# dispatch-grok.sh - Headless Grok executor for Outpost v1.9
 # WORKSPACE ISOLATION: Each run gets its own repo copy
+# v1.9: Namespace stripping support (rgsuarez/repo → repo)
 # Uses xAI API (OpenAI-compatible) via grok-agent.py
 
 REPO_NAME="${1:-}"
 TASK="${2:-}"
+
+# Strip GitHub username prefix if present (e.g., "rgsuarez/awsaudit" → "awsaudit")
+# Supports both bare names and namespaced names for external API compatibility
+if [[ "$REPO_NAME" == */* ]]; then
+    ORIGINAL_REPO_NAME="$REPO_NAME"
+    REPO_NAME="${REPO_NAME##*/}"
+    echo "📝 Stripped namespace: $ORIGINAL_REPO_NAME → $REPO_NAME"
+fi
 
 if [[ -z "$REPO_NAME" || -z "$TASK" ]]; then
     echo "Usage: dispatch-grok.sh <repo-name> \"<task>\""
