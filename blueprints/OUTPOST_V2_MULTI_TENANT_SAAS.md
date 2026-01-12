@@ -1,30 +1,31 @@
 # Outpost V2 Multi-Tenant SaaS — Implementation Blueprint
 
-> **Document Status**: Complete
-> **Last Updated**: 2026-01-09
+> **Document Status**: Active
+> **Last Updated**: 2026-01-11
 > **Owner**: Platform Team
 
 <!-- BLUEPRINT METADATA (DO NOT REMOVE) -->
-<!-- _blueprint_version: 2.1.0 -->
-<!-- _generated_at: 2026-01-08T20:45:00Z -->
-<!-- _generator: outpost.gemini -->
+<!-- _blueprint_version: 2.0.1 -->
+<!-- _generated_at: 2026-01-11T19:30:00Z -->
+<!-- _generator: claude-opus-4-5 (manual) -->
 <!-- _depth: 3 -->
-<!-- _tiers_generated: T0, T1, T2, T3 -->
+<!-- _tiers_generated: T0, T1, T2, T3, T4 -->
 <!-- END METADATA -->
 
 ---
 
 ## Strategic Vision
 
-Evolve Outpost from a single-operator tool to a production-grade multi-tenant SaaS platform. The current architecture (single EC2 with SSM dispatch, workspace isolation, 5 operational agents) will be transformed into a horizontally scalable system with:
+Transform Outpost from a single-operator EC2+SSM tool into a production-grade multi-tenant SaaS platform. The architecture prioritizes **pay-per-use economics** — near-zero cost when idle (<$15/month), linear scaling to 1000+ concurrent users.
 
-- **API Gateway + Lambda** for request handling and authentication
-- **SQS + ECS Fargate** for elastic job processing
-- **DynamoDB** for tenant/job metadata and audit trails
-- **Secrets Manager** for per-tenant API key storage
-- **Stripe** for subscription billing (BYOK model)
+**Core Architecture:**
+- **API Gateway + Lambda** — Request handling, authentication, rate limiting
+- **SQS + ECS Fargate** — Queue-based job processing with auto-scaling (0-20 workers)
+- **DynamoDB** — Tenant/job metadata, usage tracking, audit trails
+- **Secrets Manager** — Per-tenant BYOK credential storage
+- **Stripe** — Subscription billing (Free/Pro/Enterprise tiers)
 
-The system will maintain workspace isolation guarantees while enabling multiple tenants to dispatch AI agent jobs concurrently with full audit trails and per-request billing.
+**Critical Constraint:** Infrastructure must cost <$15/month when completely idle. All compute is Fargate (pay-per-use), no always-on EC2.
 
 ---
 
@@ -32,13 +33,14 @@ The system will maintain workspace isolation guarantees while enabling multiple 
 
 | Metric | Target | Measurement |
 |--------|--------|-------------|
-| API Authentication Latency | < 50ms p99 | CloudWatch API Gateway metrics |
-| Job Dispatch Latency | < 200ms p99 | SQS message age on consumption |
-| Concurrent Tenants | 100+ | Active API keys with jobs in-flight |
-| Horizontal Scaling | 0 to 50 workers in < 5min | ECS Fargate task count |
-| Audit Trail Coverage | 100% | All API calls logged to DynamoDB |
-| Billing Accuracy | 100% | Stripe invoice matches usage records |
-| Workspace Isolation | Zero cross-tenant access | Security audit pass |
+| Idle monthly cost | < $15 | AWS Cost Explorer (no active jobs for 30 days) |
+| API authentication latency | < 50ms p99 | CloudWatch API Gateway metrics |
+| Job dispatch latency | < 200ms p99 | SQS message age at consumption |
+| Concurrent tenants | 100+ | Active API keys with jobs in-flight |
+| Worker scale-up time | < 60 seconds | ECS task launch to running |
+| Worker scale-down to zero | < 15 minutes idle | ECS desired count = 0 |
+| Audit trail coverage | 100% | All API calls logged to DynamoDB |
+| Billing accuracy | 100% | Stripe invoice matches usage records |
 
 ---
 
@@ -53,9 +55,11 @@ execution:
   resource_locks:
     - name: "terraform_state"
       type: exclusive
+    - name: "dynamodb_schema"
+      type: exclusive
     - name: "stripe_config"
       type: exclusive
-    - name: "dynamodb_schema"
+    - name: "ecr_push"
       type: exclusive
 
   preflight_checks:
@@ -64,1335 +68,2209 @@ execution:
       error_message: "AWS CLI v2 required"
     - command: "terraform --version"
       expected_exit_code: 0
-      error_message: "Terraform required"
+      error_message: "Terraform >= 1.5 required"
     - command: "docker info"
       expected_exit_code: 0
       error_message: "Docker must be running"
     - command: "python3 --version"
       expected_exit_code: 0
       error_message: "Python 3.11+ required"
+    - command: "test -f ~/.aws/credentials"
+      expected_exit_code: 0
+      error_message: "AWS credentials not configured"
 
   secret_resolution:
     on_missing: abort
     sources:
       - type: env
         prefix: "OUTPOST_"
+      - type: file
+        path: ".env"
       - type: aws_ssm
         prefix: "/outpost/prod/"
 ```
 
 ---
 
-## Tier 0: Foundation — Infrastructure & Data Models
+## Tier 0: Foundation — Terraform Backend & Core Infrastructure
 
-### T0.1: DynamoDB Schema Design
+### T0.1: Terraform S3 Backend
 
 ```yaml
 task_id: T0.1
-name: "Design DynamoDB table schemas"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
+name: "Configure Terraform S3 backend for state management"
+status: not_started
+assignee: null
+estimated_sessions: 1
 dependencies: []
 
 input_bindings: {}
 
 interface:
-  input: "Current Outpost data model, multi-tenant requirements"
-  output: "DynamoDB table schemas with GSIs for tenants, jobs, and audit"
+  input: "AWS account ID, region, project name"
   input_type: none
+  output: "S3 bucket and DynamoDB table for Terraform state"
   output_type: json
   output_schema:
     type: object
     properties:
-      tables:
-        type: array
-        items:
-          type: object
-          properties:
-            name: { type: string }
-            partition_key: { type: string }
-            sort_key: { type: string }
-            gsis: { type: array }
-    required: [tables]
+      bucket_name: { type: string }
+      dynamodb_table: { type: string }
+      region: { type: string }
+    required: [bucket_name, dynamodb_table, region]
 
 output:
   location: file
-  path: "/tmp/blueprint/${task_id}/dynamodb_schema.json"
-  format: json
+  path: "/tmp/blueprint/T0.1/output.json"
   ports:
-    schema:
-      type: json
-    terraform_vars:
+    backend_config:
       type: json
 
 required_capabilities:
-  - python3.11
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks: []
-
-files_to_create:
-  - infrastructure/dynamodb/schema.json
-  - infrastructure/dynamodb/terraform.tfvars
-
-acceptance_criteria:
-  - "Tenants table: pk=tenant_id, indexes for api_key lookup"
-  - "Jobs table: pk=tenant_id, sk=job_id, GSI for status queries"
-  - "Audit table: pk=tenant_id, sk=timestamp, TTL for retention"
-  - "Single-table design evaluated and documented"
-  - "Capacity planning for 100+ concurrent tenants"
-
-verification:
-  smoke:
-    command: "test -f infrastructure/dynamodb/schema.json"
-    timeout: PT5S
-  unit:
-    command: "python3 -c 'import json; json.load(open(\"infrastructure/dynamodb/schema.json\"))'"
-    timeout: PT10S
-
-rollback: "rm -f infrastructure/dynamodb/schema.json infrastructure/dynamodb/terraform.tfvars"
-
-notes: |
-  Consider single-table vs multi-table design. GSI for api_key->tenant lookup is critical for auth.
-  Audit table needs TTL for compliance (90-day default retention).
-```
-
-### T0.2: Terraform Module — DynamoDB
-
-```yaml
-task_id: T0.2
-name: "Create Terraform module for DynamoDB tables"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T0.1]
-
-input_bindings:
-  schema:
-    source: T0.1
-    output_port: schema
-    transfer: file
-    required: true
-  terraform_vars:
-    source: T0.1
-    output_port: terraform_vars
-    transfer: file
-    required: true
-
-interface:
-  input: "DynamoDB schema JSON from T0.1"
-  output: "Terraform module with tables, GSIs, and IAM policies"
-  input_type: json
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/terraform_module_path.txt"
-  format: text
-  ports:
-    module_path:
-      type: file_path
-
-required_capabilities:
+  - aws-cli
   - terraform
 
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks:
-    - name: "terraform_state"
-      mode: exclusive
-
-files_to_create:
-  - infrastructure/terraform/modules/dynamodb/main.tf
-  - infrastructure/terraform/modules/dynamodb/variables.tf
-  - infrastructure/terraform/modules/dynamodb/outputs.tf
-  - infrastructure/terraform/modules/dynamodb/iam.tf
-
 acceptance_criteria:
-  - "Module creates all tables from schema"
-  - "GSIs configured with appropriate projections"
-  - "PAY_PER_REQUEST billing mode (auto-scaling)"
-  - "IAM policies for Lambda read/write access"
-  - "Point-in-time recovery enabled"
-  - "terraform validate passes"
+  - "S3 bucket exists with versioning enabled"
+  - "DynamoDB table exists for state locking"
+  - "backend.tf references correct bucket and table"
+  - "terraform init succeeds with remote backend"
 
 verification:
   smoke:
-    command: "test -f infrastructure/terraform/modules/dynamodb/main.tf"
+    command: "aws s3 ls s3://outpost-terraform-state-311493921645 --profile soc"
+    timeout: PT10S
+  unit:
+    command: "cd infrastructure/terraform && terraform init -backend=true"
+    timeout: PT2M
+
+rollback: "aws s3 rb s3://outpost-terraform-state-311493921645 --force --profile soc && aws dynamodb delete-table --table-name outpost-terraform-locks --profile soc"
+
+on_failure:
+  max_retries: 1
+  action: block
+```
+
+#### T0.1.1: Create S3 State Bucket
+
+```yaml
+task_id: T0.1.1
+name: "Create S3 bucket for Terraform state"
+status: not_started
+dependencies: []
+
+input_bindings: {}
+
+interface:
+  input: "AWS account ID (311493921645), region (us-east-1)"
+  output: "S3 bucket ARN with versioning and encryption"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.1.1/output.json"
+  ports:
+    bucket_arn:
+      type: string
+
+acceptance_criteria:
+  - "Bucket name: outpost-terraform-state-311493921645"
+  - "Versioning enabled"
+  - "Server-side encryption with AES-256"
+  - "Block all public access"
+
+verification:
+  smoke:
+    command: "aws s3api head-bucket --bucket outpost-terraform-state-311493921645 --profile soc"
+    timeout: PT10S
+
+rollback: "aws s3 rb s3://outpost-terraform-state-311493921645 --force --profile soc"
+
+files_to_create:
+  - infrastructure/terraform/bootstrap/s3_backend.tf
+```
+
+#### T0.1.2: Create DynamoDB Lock Table
+
+```yaml
+task_id: T0.1.2
+name: "Create DynamoDB table for Terraform state locking"
+status: not_started
+dependencies: [T0.1.1]
+
+input_bindings:
+  bucket:
+    source: T0.1.1
+    output_port: bucket_arn
+    transfer: memory
+    required: true
+
+interface:
+  input: "Region from T0.1.1"
+  output: "DynamoDB table ARN"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.1.2/output.json"
+  ports:
+    table_arn:
+      type: string
+
+acceptance_criteria:
+  - "Table name: outpost-terraform-locks"
+  - "Partition key: LockID (String)"
+  - "On-demand billing mode (pay-per-use)"
+
+verification:
+  smoke:
+    command: "aws dynamodb describe-table --table-name outpost-terraform-locks --profile soc --query 'Table.TableStatus' --output text | grep ACTIVE"
+    timeout: PT10S
+
+rollback: "aws dynamodb delete-table --table-name outpost-terraform-locks --profile soc"
+
+files_to_create:
+  - infrastructure/terraform/bootstrap/dynamodb_lock.tf
+```
+
+#### T0.1.3: Create Backend Configuration
+
+```yaml
+task_id: T0.1.3
+name: "Create backend.tf configuration file"
+status: not_started
+dependencies: [T0.1.1, T0.1.2]
+
+input_bindings:
+  bucket:
+    source: T0.1.1
+    output_port: bucket_arn
+    transfer: memory
+    required: true
+  table:
+    source: T0.1.2
+    output_port: table_arn
+    transfer: memory
+    required: true
+
+interface:
+  input: "Bucket ARN from T0.1.1, Table ARN from T0.1.2"
+  output: "backend.tf file path"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.1.3/output.json"
+  ports:
+    backend_file:
+      type: file_path
+
+acceptance_criteria:
+  - "backend.tf exists in infrastructure/terraform/"
+  - "terraform init succeeds"
+  - "State file created in S3"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/backend.tf"
     timeout: PT5S
   unit:
-    command: "cd infrastructure/terraform/modules/dynamodb && terraform init -backend=false && terraform validate"
+    command: "cd infrastructure/terraform && terraform init -reconfigure"
     timeout: PT2M
 
-rollback: "rm -rf infrastructure/terraform/modules/dynamodb"
-
-notes: |
-  Use PAY_PER_REQUEST for unpredictable multi-tenant workloads.
-  Enable point-in-time recovery for audit compliance.
-```
-
-### T0.3: API Data Models (Python/Pydantic)
-
-```yaml
-task_id: T0.3
-name: "Define API data models with Pydantic"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T0.1]
-
-input_bindings:
-  schema:
-    source: T0.1
-    output_port: schema
-    transfer: file
-    required: true
-
-interface:
-  input: "DynamoDB schema from T0.1"
-  output: "Pydantic models for Tenant, Job, AuditEntry, APIKey"
-  input_type: json
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/models_path.txt"
-  format: text
-  ports:
-    models_module:
-      type: file_path
-    model_schemas:
-      type: json
-
-required_capabilities:
-  - python3.11
-  - pydantic
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks: []
+rollback: "rm -f infrastructure/terraform/backend.tf"
 
 files_to_create:
-  - src/outpost/models/__init__.py
-  - src/outpost/models/tenant.py
-  - src/outpost/models/job.py
-  - src/outpost/models/audit.py
-  - src/outpost/models/api_key.py
-
-acceptance_criteria:
-  - "Tenant model: id, name, email, stripe_customer_id, created_at, status"
-  - "Job model: id, tenant_id, agent, command, status, created_at, completed_at, output_location"
-  - "AuditEntry model: tenant_id, timestamp, action, resource, metadata, request_id"
-  - "APIKey model: key_hash, tenant_id, name, scopes, created_at, last_used, revoked"
-  - "All models have JSON schema export"
-  - "Validation tests pass"
-
-verification:
-  smoke:
-    command: "python3 -c 'from src.outpost.models import Tenant, Job, AuditEntry'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_models.py -v"
-    timeout: PT2M
-
-rollback: "rm -rf src/outpost/models"
-
-notes: |
-  Use Pydantic v2 for performance. Include validators for tenant_id format (uuid).
-  APIKey stores hash only, never plaintext.
-```
-
-### T0.4: Secrets Manager Integration
-
-```yaml
-task_id: T0.4
-name: "Implement Secrets Manager client for API keys"
-status: completed
-assignee: "Claude"
-estimated_sessions: 1
-dependencies: [T0.3]
-
-input_bindings:
-  models_module:
-    source: T0.3
-    output_port: models_module
-    transfer: file
-    required: true
-
-interface:
-  input: "Pydantic APIKey model from T0.3"
-  output: "SecretsManager client for storing/retrieving per-tenant secrets"
-  input_type: file_path
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/secrets_client_path.txt"
-  format: text
-  ports:
-    secrets_client:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - boto3
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks: []
-
-files_to_create:
-  - src/outpost/secrets/__init__.py
-  - src/outpost/secrets/manager.py
-  - src/outpost/secrets/api_key.py
-
-acceptance_criteria:
-  - "Create secret with automatic rotation policy"
-  - "Retrieve secret with caching (5-min TTL)"
-  - "Delete secret (soft-delete with recovery window)"
-  - "Per-tenant namespace: /outpost/tenants/{tenant_id}/*"
-  - "Never log or expose plaintext secrets"
-  - "Unit tests with moto mock"
-
-verification:
-  smoke:
-    command: "python3 -c 'from src.outpost.secrets import SecretsManager'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_secrets.py -v"
-    timeout: PT2M
-
-rollback: "rm -rf src/outpost/secrets"
-
-notes: |
-  Use AWS Secrets Manager for API keys. Implement local caching to reduce costs.
-  Secret names: /outpost/tenants/{tenant_id}/api_keys/{key_name}
+  - infrastructure/terraform/backend.tf
 ```
 
 ---
 
-## Tier 1: Authentication & Authorization Layer
-
-### T1.1: API Key Authentication Lambda
+### T0.2: DynamoDB Tables
 
 ```yaml
-task_id: T1.1
-name: "Implement API key authentication Lambda authorizer"
-status: completed
-assignee: "Claude"
-estimated_sessions: 3
-dependencies: [T0.3, T0.4]
+task_id: T0.2
+name: "Create DynamoDB tables for tenant data"
+status: not_started
+dependencies: [T0.1]
 
 input_bindings:
-  models_module:
-    source: T0.3
-    output_port: models_module
-    transfer: file
-    required: true
-  secrets_client:
-    source: T0.4
-    output_port: secrets_client
+  backend:
+    source: T0.1
+    output_port: backend_config
     transfer: file
     required: true
 
 interface:
-  input: "API key from Authorization header"
-  output: "IAM policy document allowing/denying API access"
-  input_type: json
-  input_schema:
-    type: object
-    properties:
-      authorizationToken: { type: string }
-      methodArn: { type: string }
-    required: [authorizationToken, methodArn]
+  input: "Terraform backend configuration"
+  output: "DynamoDB table ARNs for all tables"
   output_type: json
   output_schema:
     type: object
     properties:
-      principalId: { type: string }
-      policyDocument: { type: object }
-      context: { type: object }
+      users_table_arn: { type: string }
+      api_keys_table_arn: { type: string }
+      jobs_table_arn: { type: string }
+      usage_table_arn: { type: string }
+    required: [users_table_arn, api_keys_table_arn, jobs_table_arn, usage_table_arn]
 
 output:
   location: file
-  path: "/tmp/blueprint/${task_id}/lambda_path.txt"
-  format: text
+  path: "/tmp/blueprint/T0.2/output.json"
   ports:
-    lambda_handler:
-      type: file_path
-    lambda_zip:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - boto3
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT2H
-  locks: []
-
-files_to_create:
-  - src/outpost/lambda/authorizer/__init__.py
-  - src/outpost/lambda/authorizer/handler.py
-  - src/outpost/lambda/authorizer/policy.py
-  - tests/unit/test_authorizer.py
+    table_arns:
+      type: json
 
 acceptance_criteria:
-  - "Validates API key format (op_live_*, op_test_*)"
-  - "Looks up key hash in DynamoDB"
-  - "Checks key not revoked and within scope"
-  - "Returns IAM policy with tenant context"
-  - "Caches auth decisions (5-min TTL)"
-  - "Latency < 50ms p99 (measured in tests)"
-  - "Audit log entry for every auth attempt"
+  - "users table with user_id partition key"
+  - "api_keys table with key_hash partition key, user_id GSI"
+  - "jobs table with job_id partition key, user_id-status GSI"
+  - "usage_events table with user_id partition key, timestamp sort key"
+  - "All tables use on-demand billing (PAY_PER_REQUEST)"
 
 verification:
   smoke:
-    command: "python3 -c 'from src.outpost.lambda.authorizer import handler'"
-    timeout: PT10S
+    command: "aws dynamodb list-tables --profile soc --query 'TableNames' | grep -c outpost"
+    timeout: PT15S
   unit:
-    command: "python3 -m pytest tests/unit/test_authorizer.py -v --tb=short"
-    timeout: PT2M
-  integration:
-    command: "python3 -m pytest tests/integration/test_authorizer.py -v"
-    timeout: PT5M
-    optional: true
-
-rollback: "rm -rf src/outpost/lambda/authorizer"
-
-notes: |
-  Use TOKEN authorizer type. Cache policy for 300 seconds.
-  Key format: op_live_<32-char-hex> or op_test_<32-char-hex>
-```
-
-### T1.2: Tenant Management API
-
-```yaml
-task_id: T1.2
-name: "Implement tenant CRUD API endpoints"
-status: completed
-assignee: "Claude"
-estimated_sessions: 3
-dependencies: [T0.2, T0.3, T1.1]
-
-input_bindings:
-  models_module:
-    source: T0.3
-    output_port: models_module
-    transfer: file
-    required: true
-  lambda_handler:
-    source: T1.1
-    output_port: lambda_handler
-    transfer: file
-    required: true
-
-interface:
-  input: "HTTP requests to /tenants endpoints"
-  output: "Lambda handlers for tenant CRUD operations"
-  input_type: json
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/tenant_api_path.txt"
-  format: text
-  ports:
-    api_handlers:
-      type: file_path
-    openapi_spec:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - boto3
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT2H
-  locks: []
-
-files_to_create:
-  - src/outpost/lambda/api/tenants.py
-  - src/outpost/lambda/api/api_keys.py
-  - docs/api/openapi.yaml
-  - tests/unit/test_tenant_api.py
-
-acceptance_criteria:
-  - "POST /tenants - Create tenant (admin only)"
-  - "GET /tenants/{id} - Get tenant details"
-  - "PATCH /tenants/{id} - Update tenant"
-  - "DELETE /tenants/{id} - Soft-delete tenant"
-  - "POST /tenants/{id}/api-keys - Generate API key"
-  - "DELETE /tenants/{id}/api-keys/{key_id} - Revoke API key"
-  - "All operations create audit entries"
-  - "OpenAPI spec documents all endpoints"
-
-verification:
-  smoke:
-    command: "python3 -c 'from src.outpost.lambda.api.tenants import handler'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_tenant_api.py -v"
+    command: "cd infrastructure/terraform && terraform plan -target=module.dynamodb"
     timeout: PT2M
 
-rollback: "rm -f src/outpost/lambda/api/tenants.py src/outpost/lambda/api/api_keys.py"
-
-notes: |
-  Use Lambda function URLs or API Gateway proxy integration.
-  Admin endpoints require special admin scope in API key.
-```
-
-### T1.3: API Gateway Configuration (Terraform)
-
-```yaml
-task_id: T1.3
-name: "Create Terraform module for API Gateway"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T1.1, T1.2]
-
-input_bindings:
-  lambda_handler:
-    source: T1.1
-    output_port: lambda_handler
-    transfer: file
-    required: true
-  api_handlers:
-    source: T1.2
-    output_port: api_handlers
-    transfer: file
-    required: true
-
-interface:
-  input: "Lambda handlers from T1.1 and T1.2"
-  output: "Terraform module for API Gateway with authorizer"
-  input_type: file_path
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/api_gw_module_path.txt"
-  format: text
-  ports:
-    module_path:
-      type: file_path
-    api_endpoint:
-      type: text
-
-required_capabilities:
-  - terraform
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.dynamodb -auto-approve"
 
 resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
   locks:
     - name: "terraform_state"
       mode: exclusive
+    - name: "dynamodb_schema"
+      mode: exclusive
+```
 
-files_to_create:
-  - infrastructure/terraform/modules/api_gateway/main.tf
-  - infrastructure/terraform/modules/api_gateway/variables.tf
-  - infrastructure/terraform/modules/api_gateway/outputs.tf
-  - infrastructure/terraform/modules/api_gateway/routes.tf
+#### T0.2.1: Users Table Schema
+
+```yaml
+task_id: T0.2.1
+name: "Define users table Terraform module"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "User data model requirements"
+  output: "Terraform module for users table"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.2.1/output.json"
+  ports:
+    module_path:
+      type: file_path
 
 acceptance_criteria:
-  - "HTTP API (API Gateway v2) for lower latency"
-  - "TOKEN authorizer integration"
-  - "Routes: /tenants/*, /jobs/*, /health"
-  - "CORS configuration for web console"
-  - "Custom domain support (optional)"
+  - "Partition key: user_id (S)"
+  - "Attributes: email, created_at, tier, stripe_customer_id"
+  - "GSI: email-index (email -> user_id)"
+  - "Billing mode: PAY_PER_REQUEST"
+  - "Point-in-time recovery enabled"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/modules/dynamodb/users.tf"
+    timeout: PT5S
+
+rollback: "rm -f infrastructure/terraform/modules/dynamodb/users.tf"
+
+files_to_create:
+  - infrastructure/terraform/modules/dynamodb/users.tf
+```
+
+#### T0.2.2: API Keys Table Schema
+
+```yaml
+task_id: T0.2.2
+name: "Define api_keys table Terraform module"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "API key data model requirements"
+  output: "Terraform module for api_keys table"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.2.2/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Partition key: key_hash (S) — SHA-256 of full key"
+  - "Attributes: user_id, key_prefix, environment, created_at, last_used_at, revoked_at"
+  - "GSI: user_id-index (user_id -> key_hash)"
+  - "Billing mode: PAY_PER_REQUEST"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/modules/dynamodb/api_keys.tf"
+    timeout: PT5S
+
+rollback: "rm -f infrastructure/terraform/modules/dynamodb/api_keys.tf"
+
+files_to_create:
+  - infrastructure/terraform/modules/dynamodb/api_keys.tf
+```
+
+#### T0.2.3: Jobs Table Schema
+
+```yaml
+task_id: T0.2.3
+name: "Define jobs table Terraform module"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "Job data model requirements"
+  output: "Terraform module for jobs table"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.2.3/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Partition key: job_id (S)"
+  - "Sort key: none (single item per job)"
+  - "Attributes: user_id, status, executor, repo, task, created_at, started_at, completed_at, output_url"
+  - "GSI: user_id-status-index (user_id, status) for querying user's jobs by status"
+  - "GSI: status-created_at-index (status, created_at) for queue polling"
+  - "Billing mode: PAY_PER_REQUEST"
+  - "TTL on completed jobs (90 days)"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/modules/dynamodb/jobs.tf"
+    timeout: PT5S
+
+rollback: "rm -f infrastructure/terraform/modules/dynamodb/jobs.tf"
+
+files_to_create:
+  - infrastructure/terraform/modules/dynamodb/jobs.tf
+```
+
+#### T0.2.4: Usage Events Table Schema
+
+```yaml
+task_id: T0.2.4
+name: "Define usage_events table Terraform module"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "Usage tracking data model"
+  output: "Terraform module for usage_events table"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.2.4/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Partition key: user_id (S)"
+  - "Sort key: timestamp (S) — ISO 8601"
+  - "Attributes: event_type, job_id, executor, duration_ms, api_key_prefix"
+  - "Billing mode: PAY_PER_REQUEST"
+  - "TTL: 365 days"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/modules/dynamodb/usage_events.tf"
+    timeout: PT5S
+
+rollback: "rm -f infrastructure/terraform/modules/dynamodb/usage_events.tf"
+
+files_to_create:
+  - infrastructure/terraform/modules/dynamodb/usage_events.tf
+```
+
+#### T0.2.5: Apply DynamoDB Terraform
+
+```yaml
+task_id: T0.2.5
+name: "Apply DynamoDB Terraform configuration"
+status: not_started
+dependencies: [T0.2.1, T0.2.2, T0.2.3, T0.2.4]
+
+interface:
+  input: "All DynamoDB table modules"
+  output: "Created table ARNs"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.2.5/output.json"
+  ports:
+    table_arns:
+      type: json
+
+acceptance_criteria:
+  - "terraform apply succeeds"
+  - "All 4 tables created in us-east-1"
+  - "All tables show ACTIVE status"
+
+verification:
+  smoke:
+    command: "aws dynamodb list-tables --profile soc --region us-east-1 | grep -c outpost"
+    timeout: PT15S
+  unit:
+    command: "cd infrastructure/terraform && terraform output -json dynamodb_table_arns"
+    timeout: PT30S
+
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.dynamodb -auto-approve"
+
+resources:
+  locks:
+    - name: "terraform_state"
+      mode: exclusive
+```
+
+---
+
+### T0.3: Secrets Manager Configuration
+
+```yaml
+task_id: T0.3
+name: "Configure AWS Secrets Manager for tenant credentials"
+status: not_started
+dependencies: [T0.1]
+
+input_bindings:
+  backend:
+    source: T0.1
+    output_port: backend_config
+    transfer: file
+    required: true
+
+interface:
+  input: "Terraform backend"
+  output: "Secrets Manager ARN prefix for tenant secrets"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.3/output.json"
+  ports:
+    secrets_prefix:
+      type: string
+
+acceptance_criteria:
+  - "Terraform module for Secrets Manager exists"
+  - "IAM policy for secret access created"
+  - "Secret naming convention: /outpost/tenants/{user_id}/{key_type}"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/modules/secrets/main.tf"
+    timeout: PT5S
+
+rollback: "rm -rf infrastructure/terraform/modules/secrets/"
+
+files_to_create:
+  - infrastructure/terraform/modules/secrets/main.tf
+  - infrastructure/terraform/modules/secrets/variables.tf
+  - infrastructure/terraform/modules/secrets/outputs.tf
+  - infrastructure/terraform/modules/secrets/iam.tf
+```
+
+#### T0.3.1: Secrets Manager Terraform Module
+
+```yaml
+task_id: T0.3.1
+name: "Create Secrets Manager Terraform module"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "Secret naming convention and IAM requirements"
+  output: "Terraform module files"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.3.1/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Module creates IAM policy for Lambda/ECS secret access"
+  - "Secret naming: /outpost/tenants/{user_id}/github_token"
+  - "Secret naming: /outpost/tenants/{user_id}/anthropic_key"
+  - "Secret naming: /outpost/tenants/{user_id}/openai_key"
+  - "KMS encryption with customer-managed key"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/modules/secrets/main.tf"
+    timeout: PT5S
+
+rollback: "rm -rf infrastructure/terraform/modules/secrets/"
+
+files_to_create:
+  - infrastructure/terraform/modules/secrets/main.tf
+  - infrastructure/terraform/modules/secrets/variables.tf
+  - infrastructure/terraform/modules/secrets/outputs.tf
+```
+
+#### T0.3.2: Secrets IAM Policy
+
+```yaml
+task_id: T0.3.2
+name: "Create IAM policy for secret access"
+status: not_started
+dependencies: [T0.3.1]
+
+interface:
+  input: "Secrets Manager module"
+  output: "IAM policy ARN"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.3.2/output.json"
+  ports:
+    policy_arn:
+      type: string
+
+acceptance_criteria:
+  - "Policy allows secretsmanager:GetSecretValue"
+  - "Resource scoped to /outpost/tenants/* prefix"
+  - "Condition restricts to specific ECS task role and Lambda role"
+
+verification:
+  smoke:
+    command: "test -f infrastructure/terraform/modules/secrets/iam.tf"
+    timeout: PT5S
+
+rollback: "rm -f infrastructure/terraform/modules/secrets/iam.tf"
+
+files_to_create:
+  - infrastructure/terraform/modules/secrets/iam.tf
+```
+
+#### T0.3.3: Apply Secrets Manager Terraform
+
+```yaml
+task_id: T0.3.3
+name: "Apply Secrets Manager Terraform configuration"
+status: not_started
+dependencies: [T0.3.1, T0.3.2]
+
+interface:
+  input: "Secrets Manager module"
+  output: "Created resources"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T0.3.3/output.json"
+  ports:
+    kms_key_arn:
+      type: string
+    policy_arn:
+      type: string
+
+acceptance_criteria:
+  - "KMS key created for secrets encryption"
+  - "IAM policy attached"
+  - "terraform apply succeeds"
+
+verification:
+  smoke:
+    command: "cd infrastructure/terraform && terraform output -json secrets_kms_key_arn"
+    timeout: PT30S
+
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.secrets -auto-approve"
+
+resources:
+  locks:
+    - name: "terraform_state"
+      mode: exclusive
+```
+
+---
+
+## Tier 1: Authentication & API Layer
+
+### T1.1: API Gateway Configuration
+
+```yaml
+task_id: T1.1
+name: "Configure API Gateway with Lambda authorizer"
+status: not_started
+dependencies: [T0.2, T0.3]
+
+input_bindings:
+  tables:
+    source: T0.2
+    output_port: table_arns
+    transfer: file
+    required: true
+  secrets:
+    source: T0.3
+    output_port: secrets_prefix
+    transfer: file
+    required: true
+
+interface:
+  input: "DynamoDB table ARNs, Secrets prefix"
+  output: "API Gateway endpoint URL"
+  output_type: json
+  output_schema:
+    type: object
+    properties:
+      api_url: { type: string }
+      api_id: { type: string }
+      stage: { type: string }
+    required: [api_url, api_id]
+
+output:
+  location: file
+  path: "/tmp/blueprint/T1.1/output.json"
+  ports:
+    api_endpoint:
+      type: json
+
+acceptance_criteria:
+  - "API Gateway HTTP API created"
+  - "Lambda authorizer attached to all routes"
+  - "Routes: POST /v1/jobs, GET /v1/jobs, GET /v1/jobs/{id}, GET /v1/usage"
+  - "CORS enabled for web console"
+  - "Custom domain ready (optional)"
+
+verification:
+  smoke:
+    command: "cd infrastructure/terraform && terraform output -json api_gateway_url"
+    timeout: PT30S
+  unit:
+    command: "curl -s -o /dev/null -w '%{http_code}' $(terraform output -raw api_gateway_url)/health | grep 200"
+    timeout: PT30S
+
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.api_gateway -auto-approve"
+```
+
+#### T1.1.1: Lambda Authorizer Function
+
+```yaml
+task_id: T1.1.1
+name: "Create Lambda authorizer for API key validation"
+status: not_started
+dependencies: [T0.2.5]
+
+interface:
+  input: "DynamoDB api_keys table ARN"
+  output: "Lambda function ARN"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T1.1.1/output.json"
+  ports:
+    lambda_arn:
+      type: string
+
+acceptance_criteria:
+  - "Lambda function in Python 3.11"
+  - "Validates op_live_xxx and op_test_xxx key formats"
+  - "Looks up key_hash in DynamoDB api_keys table"
+  - "Returns IAM policy with user_id in context"
+  - "Updates last_used_at on successful auth"
+  - "Rejects revoked keys"
+  - "< 50ms cold start (use provisioned concurrency if needed)"
+
+verification:
+  smoke:
+    command: "test -f src/outpost/functions/authorizer/handler.py"
+    timeout: PT5S
+  unit:
+    command: "cd src && python -m pytest tests/unit/test_authorizer.py -v"
+    timeout: PT2M
+
+rollback: "rm -rf src/outpost/functions/authorizer/"
+
+files_to_create:
+  - src/outpost/functions/authorizer/handler.py
+  - src/outpost/functions/authorizer/__init__.py
+  - tests/unit/test_authorizer.py
+```
+
+#### T1.1.2: API Gateway Terraform Module
+
+```yaml
+task_id: T1.1.2
+name: "Create API Gateway Terraform module"
+status: not_started
+dependencies: [T1.1.1]
+
+interface:
+  input: "Lambda authorizer ARN"
+  output: "Terraform module files"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T1.1.2/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "HTTP API (not REST API) for cost efficiency"
+  - "Lambda authorizer integration"
+  - "Routes defined with OpenAPI spec"
+  - "Throttling: 100 req/sec burst, 50 req/sec steady"
   - "Access logging to CloudWatch"
-  - "Rate limiting per API key (1000 req/min default)"
 
 verification:
   smoke:
     command: "test -f infrastructure/terraform/modules/api_gateway/main.tf"
     timeout: PT5S
-  unit:
-    command: "cd infrastructure/terraform/modules/api_gateway && terraform init -backend=false && terraform validate"
-    timeout: PT2M
 
-rollback: "rm -rf infrastructure/terraform/modules/api_gateway"
+rollback: "rm -rf infrastructure/terraform/modules/api_gateway/"
 
-notes: |
-  Use HTTP API (v2) not REST API for cost/latency.
-  Authorizer caching = 300s, key source = Authorization header.
+files_to_create:
+  - infrastructure/terraform/modules/api_gateway/main.tf
+  - infrastructure/terraform/modules/api_gateway/routes.tf
+  - infrastructure/terraform/modules/api_gateway/variables.tf
+  - infrastructure/terraform/modules/api_gateway/outputs.tf
 ```
 
-### T1.4: Audit Trail Service
+#### T1.1.3: API Route Handlers
 
 ```yaml
-task_id: T1.4
-name: "Implement audit trail logging service"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T0.2, T0.3]
-
-input_bindings:
-  models_module:
-    source: T0.3
-    output_port: models_module
-    transfer: file
-    required: true
+task_id: T1.1.3
+name: "Create Lambda handlers for API routes"
+status: not_started
+dependencies: [T0.2.5]
 
 interface:
-  input: "Request context from Lambda handlers"
-  output: "AuditService class for logging all API operations"
-  input_type: json
-  output_type: file_path
+  input: "DynamoDB table ARNs"
+  output: "Lambda function ARNs for all routes"
 
 output:
   location: file
-  path: "/tmp/blueprint/${task_id}/audit_service_path.txt"
-  format: text
+  path: "/tmp/blueprint/T1.1.3/output.json"
   ports:
-    audit_service:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - boto3
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks: []
-
-files_to_create:
-  - src/outpost/services/audit.py
-  - tests/unit/test_audit.py
+    lambda_arns:
+      type: json
 
 acceptance_criteria:
-  - "Log all API calls with: tenant_id, action, resource, timestamp, request_id"
-  - "Include request metadata (IP, user-agent, etc.)"
-  - "Async write to DynamoDB (non-blocking)"
-  - "TTL set for compliance retention (90 days default)"
-  - "Query interface for audit retrieval"
-  - "Export to S3 for long-term storage"
+  - "POST /v1/jobs — Submit job to queue"
+  - "GET /v1/jobs — List user's jobs (paginated)"
+  - "GET /v1/jobs/{id} — Get job details"
+  - "GET /v1/usage — Get usage statistics"
+  - "All handlers validate input with Pydantic"
+  - "All handlers log to CloudWatch with user_id"
 
 verification:
   smoke:
-    command: "python3 -c 'from src.outpost.services.audit import AuditService'"
-    timeout: PT10S
+    command: "test -f src/outpost/functions/api/jobs.py"
+    timeout: PT5S
   unit:
-    command: "python3 -m pytest tests/unit/test_audit.py -v"
+    command: "cd src && python -m pytest tests/unit/test_api_handlers.py -v"
     timeout: PT2M
 
-rollback: "rm -f src/outpost/services/audit.py"
+rollback: "rm -rf src/outpost/functions/api/"
 
-notes: |
-  Use DynamoDB TTL for automatic cleanup. Async writes via SQS for non-blocking.
-  Consider firehose to S3 for long-term retention beyond 90 days.
+files_to_create:
+  - src/outpost/functions/api/jobs.py
+  - src/outpost/functions/api/usage.py
+  - src/outpost/functions/api/__init__.py
+  - tests/unit/test_api_handlers.py
+```
+
+#### T1.1.4: Apply API Gateway Terraform
+
+```yaml
+task_id: T1.1.4
+name: "Apply API Gateway Terraform and deploy Lambdas"
+status: not_started
+dependencies: [T1.1.1, T1.1.2, T1.1.3]
+
+interface:
+  input: "All Lambda functions and API Gateway module"
+  output: "Deployed API endpoint"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T1.1.4/output.json"
+  ports:
+    api_url:
+      type: string
+
+acceptance_criteria:
+  - "terraform apply succeeds"
+  - "API Gateway endpoint accessible"
+  - "Authorizer rejects invalid keys with 401"
+  - "Health endpoint returns 200"
+
+verification:
+  smoke:
+    command: "curl -s -o /dev/null -w '%{http_code}' $(cd infrastructure/terraform && terraform output -raw api_gateway_url)/health"
+    timeout: PT30S
+  integration:
+    command: "cd tests && python -m pytest integration/test_api_gateway.py -v"
+    timeout: PT5M
+
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.api_gateway -auto-approve"
+
+resources:
+  locks:
+    - name: "terraform_state"
+      mode: exclusive
 ```
 
 ---
 
-## Tier 2: Job Processing & Scaling Layer
-
-### T2.1: SQS Queue Configuration (Terraform)
+### T1.2: Tenant Management API
 
 ```yaml
-task_id: T2.1
-name: "Create Terraform module for SQS job queues"
-status: completed
-assignee: "Claude"
-estimated_sessions: 1
-dependencies: [T0.2]
+task_id: T1.2
+name: "Implement tenant registration and API key management"
+status: not_started
+dependencies: [T1.1]
 
 input_bindings:
-  dynamodb_module:
-    source: T0.2
-    output_port: module_path
+  api:
+    source: T1.1
+    output_port: api_endpoint
     transfer: file
     required: true
 
 interface:
-  input: "DynamoDB module outputs from T0.2"
-  output: "Terraform module for SQS queues with DLQ"
-  input_type: file_path
-  output_type: file_path
+  input: "API Gateway endpoint"
+  output: "Tenant management endpoints"
 
 output:
   location: file
-  path: "/tmp/blueprint/${task_id}/sqs_module_path.txt"
-  format: text
+  path: "/tmp/blueprint/T1.2/output.json"
   ports:
-    module_path:
+    endpoints:
+      type: json
+
+acceptance_criteria:
+  - "POST /v1/auth/register — Create new tenant"
+  - "POST /v1/auth/api-keys — Generate new API key"
+  - "GET /v1/auth/api-keys — List user's API keys (masked)"
+  - "DELETE /v1/auth/api-keys/{id} — Revoke API key"
+  - "API key format: op_live_XXXX or op_test_XXXX"
+  - "Keys stored as SHA-256 hash in DynamoDB"
+
+verification:
+  smoke:
+    command: "test -f src/outpost/functions/api/auth.py"
+    timeout: PT5S
+  unit:
+    command: "cd src && python -m pytest tests/unit/test_auth.py -v"
+    timeout: PT2M
+
+rollback: "rm -f src/outpost/functions/api/auth.py"
+
+files_to_create:
+  - src/outpost/functions/api/auth.py
+  - tests/unit/test_auth.py
+```
+
+#### T1.2.1: User Registration Handler
+
+```yaml
+task_id: T1.2.1
+name: "Implement user registration endpoint"
+status: not_started
+dependencies: [T0.2.5]
+
+interface:
+  input: "Email, password (or OAuth)"
+  output: "User ID and initial API key"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T1.2.1/output.json"
+  ports:
+    handler_path:
       type: file_path
+
+acceptance_criteria:
+  - "Validates email format"
+  - "Creates user record in DynamoDB"
+  - "Generates initial API key"
+  - "Sets default tier to 'free'"
+  - "Returns user_id and masked API key"
+
+verification:
+  smoke:
+    command: "grep -q 'def register' src/outpost/functions/api/auth.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/functions/api/auth.py"
+```
+
+#### T1.2.2: API Key Generation
+
+```yaml
+task_id: T1.2.2
+name: "Implement API key generation and storage"
+status: not_started
+dependencies: [T0.2.5]
+
+interface:
+  input: "User ID, environment (live/test)"
+  output: "Generated API key (shown once)"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T1.2.2/output.json"
+  ports:
+    handler_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Generate cryptographically secure 32-byte key"
+  - "Format: op_{env}_{base64_key}"
+  - "Store SHA-256 hash in DynamoDB (never raw key)"
+  - "Store key_prefix for display (op_live_abc123...)"
+  - "Return full key only once at creation"
+
+verification:
+  smoke:
+    command: "grep -q 'def generate_api_key' src/outpost/functions/api/auth.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/functions/api/auth.py"
+```
+
+#### T1.2.3: API Key Revocation
+
+```yaml
+task_id: T1.2.3
+name: "Implement API key revocation"
+status: not_started
+dependencies: [T1.2.2]
+
+interface:
+  input: "API key ID, user ID"
+  output: "Revocation confirmation"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T1.2.3/output.json"
+  ports:
+    handler_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Verify key belongs to requesting user"
+  - "Set revoked_at timestamp"
+  - "Authorizer rejects revoked keys immediately"
+  - "Key remains in database for audit trail"
+
+verification:
+  smoke:
+    command: "grep -q 'def revoke_api_key' src/outpost/functions/api/auth.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/functions/api/auth.py"
+```
+
+---
+
+## Tier 2: Job Queue & Worker Pool
+
+### T2.1: SQS Queue Configuration
+
+```yaml
+task_id: T2.1
+name: "Create SQS queues with priority lanes"
+status: not_started
+dependencies: [T0.1]
+
+input_bindings:
+  backend:
+    source: T0.1
+    output_port: backend_config
+    transfer: file
+    required: true
+
+interface:
+  input: "Terraform backend"
+  output: "SQS queue URLs and ARNs"
+  output_type: json
+  output_schema:
+    type: object
+    properties:
+      free_queue_url: { type: string }
+      pro_queue_url: { type: string }
+      enterprise_queue_url: { type: string }
+      dlq_url: { type: string }
+    required: [free_queue_url, pro_queue_url, dlq_url]
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.1/output.json"
+  ports:
     queue_urls:
       type: json
 
-required_capabilities:
-  - terraform
+acceptance_criteria:
+  - "3 priority queues: outpost-jobs-free, outpost-jobs-pro, outpost-jobs-enterprise"
+  - "1 dead letter queue: outpost-jobs-dlq"
+  - "Visibility timeout: 5 minutes"
+  - "Message retention: 14 days"
+  - "DLQ receives after 3 failed attempts"
+  - "Long polling enabled (20 seconds)"
 
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks:
-    - name: "terraform_state"
-      mode: exclusive
+verification:
+  smoke:
+    command: "aws sqs list-queues --profile soc --queue-name-prefix outpost-jobs | grep -c outpost"
+    timeout: PT15S
+
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.sqs -auto-approve"
 
 files_to_create:
   - infrastructure/terraform/modules/sqs/main.tf
   - infrastructure/terraform/modules/sqs/variables.tf
   - infrastructure/terraform/modules/sqs/outputs.tf
-  - infrastructure/terraform/modules/sqs/dlq.tf
+```
+
+#### T2.1.1: SQS Terraform Module
+
+```yaml
+task_id: T2.1.1
+name: "Create SQS Terraform module"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "Queue requirements"
+  output: "Terraform module files"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.1.1/output.json"
+  ports:
+    module_path:
+      type: file_path
 
 acceptance_criteria:
-  - "Main job queue: outpost-jobs-{env}"
-  - "Dead letter queue: outpost-jobs-dlq-{env}"
-  - "Visibility timeout: 15 minutes"
-  - "Message retention: 14 days"
-  - "DLQ redrive policy: 3 attempts"
-  - "IAM policies for Lambda/Fargate access"
-  - "CloudWatch alarms for DLQ depth"
+  - "Standard queues (not FIFO) for cost efficiency"
+  - "Server-side encryption with AWS-managed key"
+  - "Redrive policy to DLQ after 3 failures"
+  - "IAM policy for Lambda/ECS access"
 
 verification:
   smoke:
     command: "test -f infrastructure/terraform/modules/sqs/main.tf"
     timeout: PT5S
-  unit:
-    command: "cd infrastructure/terraform/modules/sqs && terraform init -backend=false && terraform validate"
-    timeout: PT2M
 
-rollback: "rm -rf infrastructure/terraform/modules/sqs"
+rollback: "rm -rf infrastructure/terraform/modules/sqs/"
 
-notes: |
-  15-minute visibility timeout allows for long-running agent jobs.
-  DLQ alarm threshold: 10 messages (investigation trigger).
+files_to_create:
+  - infrastructure/terraform/modules/sqs/main.tf
+  - infrastructure/terraform/modules/sqs/variables.tf
+  - infrastructure/terraform/modules/sqs/outputs.tf
 ```
 
-### T2.2: Job Dispatch API
+#### T2.1.2: Apply SQS Terraform
 
 ```yaml
-task_id: T2.2
-name: "Implement job submission API endpoint"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T1.1, T1.4, T2.1]
-
-input_bindings:
-  lambda_handler:
-    source: T1.1
-    output_port: lambda_handler
-    transfer: file
-    required: true
-  audit_service:
-    source: T1.4
-    output_port: audit_service
-    transfer: file
-    required: true
+task_id: T2.1.2
+name: "Apply SQS Terraform configuration"
+status: not_started
+dependencies: [T2.1.1]
 
 interface:
-  input: "POST /jobs request with agent, command, workspace"
-  output: "Lambda handler for job submission to SQS"
-  input_type: json
-  input_schema:
-    type: object
-    properties:
-      agent: { type: string, enum: ["claude", "codex", "gemini", "grok", "aider"] }
-      command: { type: string, maxLength: 10000 }
-      workspace: { type: string }
-      priority: { type: string, enum: ["low", "normal", "high"] }
-    required: [agent, command]
-  output_type: json
-  output_schema:
-    type: object
-    properties:
-      job_id: { type: string }
-      status: { type: string }
-      estimated_start: { type: string }
+  input: "SQS module"
+  output: "Created queue URLs"
 
 output:
   location: file
-  path: "/tmp/blueprint/${task_id}/job_api_path.txt"
-  format: text
+  path: "/tmp/blueprint/T2.1.2/output.json"
   ports:
-    api_handler:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - boto3
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT2H
-  locks: []
-
-files_to_create:
-  - src/outpost/lambda/api/jobs.py
-  - tests/unit/test_jobs_api.py
+    queue_urls:
+      type: json
 
 acceptance_criteria:
-  - "POST /jobs - Submit job to SQS"
-  - "GET /jobs/{id} - Get job status"
-  - "GET /jobs - List jobs for tenant (paginated)"
-  - "DELETE /jobs/{id} - Cancel pending job"
-  - "Job ID generated as ULID for sortability"
-  - "SQS message includes tenant context"
-  - "Priority queue routing (high/normal/low)"
-  - "Audit entry for all operations"
+  - "terraform apply succeeds"
+  - "All 4 queues created"
+  - "Queues accessible from Lambda and ECS"
 
 verification:
   smoke:
-    command: "python3 -c 'from src.outpost.lambda.api.jobs import handler'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_jobs_api.py -v"
-    timeout: PT2M
+    command: "aws sqs get-queue-url --profile soc --queue-name outpost-jobs-pro"
+    timeout: PT15S
 
-rollback: "rm -f src/outpost/lambda/api/jobs.py"
-
-notes: |
-  Use ULID for job_id (time-sortable, collision-resistant).
-  Priority queues: separate SQS queues for high/normal/low.
-```
-
-### T2.3: ECS Fargate Task Definition
-
-```yaml
-task_id: T2.3
-name: "Create Fargate task definition for job workers"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T0.4, T2.1]
-
-input_bindings:
-  secrets_client:
-    source: T0.4
-    output_port: secrets_client
-    transfer: file
-    required: true
-  sqs_module:
-    source: T2.1
-    output_port: module_path
-    transfer: file
-    required: true
-
-interface:
-  input: "Secrets client and SQS queue URLs"
-  output: "Terraform module for ECS Fargate worker tasks"
-  input_type: file_path
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/ecs_module_path.txt"
-  format: text
-  ports:
-    module_path:
-      type: file_path
-    task_definition_arn:
-      type: text
-
-required_capabilities:
-  - terraform
-  - docker
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.sqs -auto-approve"
 
 resources:
-  cpu: 1
-  memory: "1Gi"
-  timeout: PT2H
   locks:
     - name: "terraform_state"
       mode: exclusive
-
-files_to_create:
-  - infrastructure/terraform/modules/ecs/main.tf
-  - infrastructure/terraform/modules/ecs/variables.tf
-  - infrastructure/terraform/modules/ecs/outputs.tf
-  - infrastructure/terraform/modules/ecs/task_definition.tf
-  - infrastructure/terraform/modules/ecs/iam.tf
-  - infrastructure/docker/worker/Dockerfile
-
-acceptance_criteria:
-  - "Task definition with 2 vCPU, 4GB memory"
-  - "SQS polling container"
-  - "IAM role with SQS, DynamoDB, Secrets Manager access"
-  - "CloudWatch logging configured"
-  - "Secrets injection via Secrets Manager"
-  - "Health check endpoint"
-  - "Graceful shutdown handling (SIGTERM)"
-
-verification:
-  smoke:
-    command: "test -f infrastructure/terraform/modules/ecs/main.tf"
-    timeout: PT5S
-  unit:
-    command: "cd infrastructure/terraform/modules/ecs && terraform init -backend=false && terraform validate"
-    timeout: PT2M
-
-rollback: "rm -rf infrastructure/terraform/modules/ecs"
-
-notes: |
-  Workers poll SQS, execute agent jobs, update DynamoDB status.
-  Long-polling (20s) for efficient message retrieval.
-```
-
-### T2.4: Job Worker Implementation
-
-```yaml
-task_id: T2.4
-name: "Implement SQS job worker for Fargate"
-status: completed
-assignee: "Claude"
-estimated_sessions: 3
-dependencies: [T0.3, T0.4, T1.4, T2.2, T2.3]
-
-input_bindings:
-  models_module:
-    source: T0.3
-    output_port: models_module
-    transfer: file
-    required: true
-  secrets_client:
-    source: T0.4
-    output_port: secrets_client
-    transfer: file
-    required: true
-  audit_service:
-    source: T1.4
-    output_port: audit_service
-    transfer: file
-    required: true
-
-interface:
-  input: "SQS message with job specification"
-  output: "Job execution result and status update"
-  input_type: json
-  output_type: json
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/worker_path.txt"
-  format: text
-  ports:
-    worker_module:
-      type: file_path
-    docker_image:
-      type: text
-
-required_capabilities:
-  - python3.11
-  - boto3
-  - docker
-
-resources:
-  cpu: 2
-  memory: "2Gi"
-  timeout: PT3H
-  locks: []
-
-files_to_create:
-  - src/outpost/worker/__init__.py
-  - src/outpost/worker/main.py
-  - src/outpost/worker/executor.py
-  - src/outpost/worker/agents.py
-  - tests/unit/test_worker.py
-
-acceptance_criteria:
-  - "SQS long-polling (20s wait time)"
-  - "Message visibility extension during processing"
-  - "Workspace isolation per tenant (EFS mount or S3)"
-  - "Agent dispatch to claude/codex/gemini/grok/aider"
-  - "Job status updates to DynamoDB"
-  - "Output capture to S3"
-  - "Graceful shutdown on SIGTERM"
-  - "Dead letter handling after 3 failures"
-  - "Audit trail for all operations"
-
-verification:
-  smoke:
-    command: "python3 -c 'from src.outpost.worker import Worker'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_worker.py -v"
-    timeout: PT5M
-  integration:
-    command: "python3 -m pytest tests/integration/test_worker.py -v"
-    timeout: PT10M
-    optional: true
-
-rollback: "rm -rf src/outpost/worker"
-
-notes: |
-  Workspace isolation critical - use tenant-specific EFS access points or S3 prefixes.
-  Visibility timeout extension: heartbeat every 5 minutes for long jobs.
-```
-
-### T2.5: Auto-Scaling Configuration
-
-```yaml
-task_id: T2.5
-name: "Configure ECS auto-scaling based on SQS depth"
-status: completed
-assignee: "Claude"
-estimated_sessions: 1
-dependencies: [T2.1, T2.3]
-
-input_bindings:
-  sqs_module:
-    source: T2.1
-    output_port: module_path
-    transfer: file
-    required: true
-  ecs_module:
-    source: T2.3
-    output_port: module_path
-    transfer: file
-    required: true
-
-interface:
-  input: "SQS and ECS module outputs"
-  output: "Terraform configuration for ECS auto-scaling"
-  input_type: file_path
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/autoscaling_path.txt"
-  format: text
-  ports:
-    module_path:
-      type: file_path
-
-required_capabilities:
-  - terraform
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks:
-    - name: "terraform_state"
-      mode: exclusive
-
-files_to_create:
-  - infrastructure/terraform/modules/autoscaling/main.tf
-  - infrastructure/terraform/modules/autoscaling/variables.tf
-  - infrastructure/terraform/modules/autoscaling/outputs.tf
-
-acceptance_criteria:
-  - "Target tracking on SQS ApproximateNumberOfMessagesVisible"
-  - "Min capacity: 1, Max capacity: 50"
-  - "Scale-out: 1 task per 5 messages"
-  - "Scale-in cooldown: 5 minutes"
-  - "Scale-out cooldown: 1 minute"
-  - "Zero to 50 workers in < 5 minutes"
-
-verification:
-  smoke:
-    command: "test -f infrastructure/terraform/modules/autoscaling/main.tf"
-    timeout: PT5S
-  unit:
-    command: "cd infrastructure/terraform/modules/autoscaling && terraform init -backend=false && terraform validate"
-    timeout: PT2M
-
-rollback: "rm -rf infrastructure/terraform/modules/autoscaling"
-
-notes: |
-  Use step scaling for predictable behavior. Consider Fargate Spot for cost savings.
-  SQS-based scaling is more responsive than CPU-based for job queues.
 ```
 
 ---
 
-## Tier 3: Billing Integration
+### T2.2: ECS Fargate Worker
 
-### T3.1: Stripe Integration Client
+```yaml
+task_id: T2.2
+name: "Create ECS Fargate task definition and service"
+status: not_started
+dependencies: [T2.1, T0.3]
+
+input_bindings:
+  queues:
+    source: T2.1
+    output_port: queue_urls
+    transfer: file
+    required: true
+  secrets:
+    source: T0.3
+    output_port: secrets_prefix
+    transfer: file
+    required: true
+
+interface:
+  input: "SQS queue URLs, Secrets Manager prefix"
+  output: "ECS cluster ARN, service ARN"
+  output_type: json
+  output_schema:
+    type: object
+    properties:
+      cluster_arn: { type: string }
+      service_arn: { type: string }
+      task_definition_arn: { type: string }
+    required: [cluster_arn, service_arn, task_definition_arn]
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.2/output.json"
+  ports:
+    ecs_resources:
+      type: json
+
+acceptance_criteria:
+  - "ECS cluster: outpost-workers"
+  - "Task definition with worker container"
+  - "Service with desired count = 0 (scale from zero)"
+  - "Task size: 0.5 vCPU, 1GB RAM"
+  - "Spot capacity provider for cost savings"
+  - "CloudWatch logging enabled"
+
+verification:
+  smoke:
+    command: "aws ecs describe-clusters --profile soc --clusters outpost-workers --query 'clusters[0].status' --output text | grep ACTIVE"
+    timeout: PT30S
+
+rollback: "cd infrastructure/terraform && terraform destroy -target=module.ecs -auto-approve"
+```
+
+#### T2.2.1: Worker Docker Image
+
+```yaml
+task_id: T2.2.1
+name: "Create worker Docker image with all agent CLIs"
+status: not_started
+dependencies: []
+
+interface:
+  input: "Agent CLI requirements"
+  output: "Docker image name and tag"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.2.1/output.json"
+  ports:
+    image_uri:
+      type: string
+
+acceptance_criteria:
+  - "Base: Ubuntu 24.04"
+  - "Includes: Python 3.12, Node.js 20, Git"
+  - "Claude Code CLI installed"
+  - "Codex CLI installed"
+  - "Gemini CLI installed"
+  - "Aider installed with DeepSeek support"
+  - "Grok agent script included"
+  - "dispatch-unified.sh copied and executable"
+  - "Image size < 2GB"
+  - "Non-root user for execution"
+
+verification:
+  smoke:
+    command: "docker build -t outpost-worker:test -f infrastructure/docker/worker/Dockerfile ."
+    timeout: PT10M
+  unit:
+    command: "docker run --rm outpost-worker:test claude --version"
+    timeout: PT30S
+
+rollback: "docker rmi outpost-worker:test"
+
+files_to_create:
+  - infrastructure/docker/worker/Dockerfile
+  - infrastructure/docker/worker/entrypoint.sh
+  - infrastructure/docker/worker/requirements.txt
+```
+
+#### T2.2.2: ECR Repository
+
+```yaml
+task_id: T2.2.2
+name: "Create ECR repository for worker image"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "Terraform backend"
+  output: "ECR repository URI"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.2.2/output.json"
+  ports:
+    repository_uri:
+      type: string
+
+acceptance_criteria:
+  - "Repository: outpost-worker"
+  - "Image scanning enabled"
+  - "Lifecycle policy: keep last 10 images"
+  - "Immutable tags enabled"
+
+verification:
+  smoke:
+    command: "aws ecr describe-repositories --profile soc --repository-names outpost-worker"
+    timeout: PT15S
+
+rollback: "aws ecr delete-repository --profile soc --repository-name outpost-worker --force"
+
+files_to_create:
+  - infrastructure/terraform/modules/ecr/main.tf
+```
+
+#### T2.2.3: Push Worker Image to ECR
+
+```yaml
+task_id: T2.2.3
+name: "Build and push worker image to ECR"
+status: not_started
+dependencies: [T2.2.1, T2.2.2]
+
+interface:
+  input: "Dockerfile, ECR repository URI"
+  output: "Pushed image URI with tag"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.2.3/output.json"
+  ports:
+    image_uri:
+      type: string
+
+acceptance_criteria:
+  - "Image built successfully"
+  - "Image pushed to ECR"
+  - "Image tagged with git SHA and 'latest'"
+  - "Vulnerability scan passes (no critical)"
+
+verification:
+  smoke:
+    command: "aws ecr describe-images --profile soc --repository-name outpost-worker --image-ids imageTag=latest"
+    timeout: PT30S
+
+rollback: "aws ecr batch-delete-image --profile soc --repository-name outpost-worker --image-ids imageTag=latest"
+
+resources:
+  locks:
+    - name: "ecr_push"
+      mode: exclusive
+```
+
+#### T2.2.4: ECS Task Definition
+
+```yaml
+task_id: T2.2.4
+name: "Create ECS Fargate task definition"
+status: not_started
+dependencies: [T2.2.3]
+
+interface:
+  input: "Worker image URI, Secrets Manager ARNs"
+  output: "Task definition ARN"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.2.4/output.json"
+  ports:
+    task_definition_arn:
+      type: string
+
+acceptance_criteria:
+  - "Fargate launch type"
+  - "CPU: 512 (0.5 vCPU), Memory: 1024 (1GB)"
+  - "Task role with SQS, DynamoDB, Secrets Manager, S3 access"
+  - "Execution role for ECR pull and CloudWatch logs"
+  - "Environment variables for queue URLs"
+  - "Secrets from Secrets Manager"
+  - "Log driver: awslogs"
+
+verification:
+  smoke:
+    command: "aws ecs describe-task-definition --profile soc --task-definition outpost-worker --query 'taskDefinition.status' --output text"
+    timeout: PT15S
+
+rollback: "aws ecs deregister-task-definition --profile soc --task-definition outpost-worker:1"
+
+files_to_create:
+  - infrastructure/terraform/modules/ecs/task_definition.tf
+```
+
+#### T2.2.5: ECS Service with Auto-Scaling
+
+```yaml
+task_id: T2.2.5
+name: "Create ECS service with scale-to-zero auto-scaling"
+status: not_started
+dependencies: [T2.2.4, T2.1.2]
+
+interface:
+  input: "Task definition ARN, SQS queue ARNs"
+  output: "ECS service ARN"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.2.5/output.json"
+  ports:
+    service_arn:
+      type: string
+
+acceptance_criteria:
+  - "Service: outpost-worker-service"
+  - "Desired count: 0 (starts scaled to zero)"
+  - "Minimum: 0, Maximum: 20"
+  - "Auto-scaling based on SQS ApproximateNumberOfMessages"
+  - "Scale up: 1 task per 5 messages"
+  - "Scale down: after 5 minutes of no messages"
+  - "Spot capacity provider (70% spot, 30% on-demand)"
+  - "Deployment circuit breaker enabled"
+
+verification:
+  smoke:
+    command: "aws ecs describe-services --profile soc --cluster outpost-workers --services outpost-worker-service --query 'services[0].status' --output text | grep ACTIVE"
+    timeout: PT30S
+  unit:
+    command: "aws application-autoscaling describe-scalable-targets --profile soc --service-namespace ecs --resource-ids service/outpost-workers/outpost-worker-service"
+    timeout: PT15S
+
+rollback: "aws ecs update-service --profile soc --cluster outpost-workers --service outpost-worker-service --desired-count 0 && aws ecs delete-service --profile soc --cluster outpost-workers --service outpost-worker-service --force"
+
+files_to_create:
+  - infrastructure/terraform/modules/ecs/service.tf
+  - infrastructure/terraform/modules/autoscaling/main.tf
+```
+
+---
+
+### T2.3: Worker Implementation
+
+```yaml
+task_id: T2.3
+name: "Implement SQS worker that processes jobs"
+status: not_started
+dependencies: [T2.2]
+
+input_bindings:
+  ecs:
+    source: T2.2
+    output_port: ecs_resources
+    transfer: file
+    required: true
+
+interface:
+  input: "ECS resources"
+  output: "Worker Python module"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.3/output.json"
+  ports:
+    worker_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Polls all 3 priority queues (enterprise first, then pro, then free)"
+  - "Retrieves tenant secrets from Secrets Manager"
+  - "Clones repo to isolated workspace"
+  - "Invokes dispatch-unified.sh with tenant credentials"
+  - "Uploads output to S3"
+  - "Updates job status in DynamoDB"
+  - "Deletes message on success, returns to queue on failure"
+  - "Graceful shutdown on SIGTERM"
+
+verification:
+  smoke:
+    command: "test -f src/outpost/worker/main.py"
+    timeout: PT5S
+  unit:
+    command: "cd src && python -m pytest tests/unit/test_worker.py -v"
+    timeout: PT3M
+
+rollback: "rm -rf src/outpost/worker/"
+
+files_to_create:
+  - src/outpost/worker/main.py
+  - src/outpost/worker/executor.py
+  - src/outpost/worker/secrets.py
+  - tests/unit/test_worker.py
+```
+
+#### T2.3.1: SQS Polling Logic
+
+```yaml
+task_id: T2.3.1
+name: "Implement SQS polling with priority ordering"
+status: not_started
+dependencies: [T2.1.2]
+
+interface:
+  input: "SQS queue URLs"
+  output: "Polling module"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.3.1/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Long polling (20 seconds)"
+  - "Priority order: enterprise > pro > free"
+  - "Batch size: 1 (for workspace isolation)"
+  - "Visibility timeout extension for long jobs"
+  - "Exponential backoff on empty queues"
+
+verification:
+  smoke:
+    command: "grep -q 'def poll_queues' src/outpost/worker/main.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/worker/main.py"
+```
+
+#### T2.3.2: Job Executor
+
+```yaml
+task_id: T2.3.2
+name: "Implement job execution with workspace isolation"
+status: not_started
+dependencies: [T2.3.1]
+
+interface:
+  input: "Job message from SQS"
+  output: "Execution result"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.3.2/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Creates isolated workspace: /workspace/{user_id}-{job_id}/"
+  - "Clones repo with tenant's GitHub PAT"
+  - "Injects tenant API keys as environment variables"
+  - "Runs dispatch-unified.sh"
+  - "Captures stdout/stderr"
+  - "Uploads artifacts to S3: s3://outpost-artifacts/{user_id}/{job_id}/"
+  - "Cleans up workspace on completion"
+  - "Timeout: configurable per tier (free: 5min, pro: 15min, enterprise: 60min)"
+
+verification:
+  smoke:
+    command: "grep -q 'def execute_job' src/outpost/worker/executor.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/worker/executor.py"
+```
+
+#### T2.3.3: S3 Artifact Storage
+
+```yaml
+task_id: T2.3.3
+name: "Implement S3 artifact upload and presigned URLs"
+status: not_started
+dependencies: [T0.1.3]
+
+interface:
+  input: "Terraform backend"
+  output: "S3 bucket and module"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T2.3.3/output.json"
+  ports:
+    bucket_name:
+      type: string
+
+acceptance_criteria:
+  - "Bucket: outpost-artifacts-{account_id}"
+  - "Lifecycle: 90-day expiration for completed jobs"
+  - "Server-side encryption"
+  - "Presigned URLs for download (1-hour expiry)"
+  - "CORS for web console access"
+
+verification:
+  smoke:
+    command: "aws s3 ls s3://outpost-artifacts-311493921645 --profile soc"
+    timeout: PT15S
+
+rollback: "aws s3 rb s3://outpost-artifacts-311493921645 --force --profile soc"
+
+files_to_create:
+  - infrastructure/terraform/modules/s3/main.tf
+```
+
+---
+
+## Tier 3: Billing & Usage Tracking
+
+### T3.1: Stripe Integration
 
 ```yaml
 task_id: T3.1
-name: "Implement Stripe client for subscription management"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T0.3]
+name: "Integrate Stripe for subscription billing"
+status: not_started
+dependencies: [T1.2]
 
 input_bindings:
-  models_module:
-    source: T0.3
-    output_port: models_module
+  auth:
+    source: T1.2
+    output_port: endpoints
     transfer: file
     required: true
 
 interface:
-  input: "Stripe API keys and tenant data"
-  output: "StripeService class for customer/subscription operations"
-  input_type: json
-  output_type: file_path
+  input: "Auth endpoints"
+  output: "Stripe webhook handler and billing endpoints"
 
 output:
   location: file
-  path: "/tmp/blueprint/${task_id}/stripe_service_path.txt"
-  format: text
+  path: "/tmp/blueprint/T3.1/output.json"
   ports:
-    stripe_service:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - stripe
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks:
-    - name: "stripe_config"
-      mode: exclusive
-
-files_to_create:
-  - src/outpost/services/billing.py
-  - src/outpost/services/stripe_client.py
-  - tests/unit/test_billing.py
+    stripe_endpoints:
+      type: json
 
 acceptance_criteria:
-  - "Create Stripe customer for new tenants"
-  - "Create checkout sessions for subscription tiers (Free, Pro, Enterprise)"
-  - "Handle subscription status updates (active, past_due, canceled)"
-  - "Map Stripe Customer ID to Tenant ID"
-  - "Unit tests with stripe-mock"
+  - "Stripe products: Free, Pro ($29/mo), Enterprise (custom)"
+  - "POST /v1/billing/subscribe — Create subscription"
+  - "POST /v1/billing/portal — Redirect to Stripe portal"
+  - "POST /v1/webhooks/stripe — Handle subscription events"
+  - "Updates user tier on subscription change"
+  - "Webhook signature verification"
 
 verification:
   smoke:
-    command: "python3 -c 'from src.outpost.services.billing import BillingService'"
-    timeout: PT10S
+    command: "test -f src/outpost/functions/api/billing.py"
+    timeout: PT5S
   unit:
-    command: "python3 -m pytest tests/unit/test_billing.py -v"
-    timeout: PT2M
-
-rollback: "rm -f src/outpost/services/billing.py src/outpost/services/stripe_client.py"
-
-notes: |
-  Use Stripe Checkout for PCI compliance.
-  Store stripe_customer_id in Tenants table.
-  Product IDs should be configurable via env vars.
-```
-
-### T3.2: Usage Metering
-
-```yaml
-task_id: T3.2
-name: "Implement usage metering logic"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T2.4, T3.1]
-
-input_bindings:
-  worker_module:
-    source: T2.4
-    output_port: worker_module
-    transfer: file
-    required: true
-  stripe_service:
-    source: T3.1
-    output_port: stripe_service
-    transfer: file
-    required: true
-
-interface:
-  input: "Job completion events"
-  output: "Updated usage records in DynamoDB and Stripe"
-  input_type: json
-  output_type: json
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/metering_path.txt"
-  format: text
-  ports:
-    metering_service:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - boto3
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks: []
-
-files_to_create:
-  - src/outpost/services/metering.py
-  - tests/unit/test_metering.py
-
-acceptance_criteria:
-  - "Track job count per tenant per billing period"
-  - "Enforce tier quotas (Free: 10, Pro: 100, Enterprise: Unlimited)"
-  - "Report metered usage to Stripe (if applicable)"
-  - "Reset quotas at billing cycle anchor"
-  - "Alerting for quota thresholds (80%, 100%)"
-
-verification:
-  smoke:
-    command: "python3 -c 'from src.outpost.services.metering import MeteringService'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_metering.py -v"
-    timeout: PT2M
-
-rollback: "rm -f src/outpost/services/metering.py"
-
-notes: |
-  Use DynamoDB atomic counters for usage tracking.
-  Quota enforcement should happen in API Gateway Authorizer (T1.1) using cached usage data.
-```
-
-### T3.3: Stripe Webhook Handler
-
-```yaml
-task_id: T3.3
-name: "Implement Stripe webhook handler"
-status: completed
-assignee: "Claude"
-estimated_sessions: 2
-dependencies: [T3.1, T3.2]
-
-input_bindings:
-  stripe_service:
-    source: T3.1
-    output_port: stripe_service
-    transfer: file
-    required: true
-
-interface:
-  input: "Stripe webhook events (HTTP POST)"
-  output: "Lambda handler for webhook processing"
-  input_type: json
-  output_type: file_path
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/webhook_handler_path.txt"
-  format: text
-  ports:
-    webhook_handler:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-  - boto3
-
-resources:
-  cpu: 1
-  memory: "512Mi"
-  timeout: PT1H
-  locks: []
-
-files_to_create:
-  - src/outpost/functions/api/webhooks.py
-  - tests/unit/test_webhooks.py
-
-acceptance_criteria:
-  - "Verify Stripe signature"
-  - "Handle 'customer.subscription.created/updated/deleted'"
-  - "Handle 'invoice.payment_succeeded/failed'"
-  - "Update tenant status in DynamoDB based on events"
-  - "Idempotent processing (handle duplicate events)"
-
-verification:
-  smoke:
-    command: "python3 -c 'from src.outpost.functions.api.webhooks import handler'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_webhooks.py -v"
-    timeout: PT2M
-
-rollback: "rm -f src/outpost/functions/api/webhooks.py"
-
-notes: |
-  Critical for subscription lifecycle.
-  Ensure secret management for Stripe Webhook Secret.
-```
-
-### T3.4: Billing Portal API
-
-```yaml
-task_id: T3.4
-name: "Implement Billing Portal API"
-status: completed
-assignee: "Claude"
-estimated_sessions: 1
-dependencies: [T3.1]
-
-input_bindings:
-  stripe_service:
-    source: T3.1
-    output_port: stripe_service
-    transfer: file
-    required: true
-
-interface:
-  input: "GET /billing/portal request"
-  output: "URL for Stripe Customer Portal"
-  input_type: json
-  output_type: url
-
-output:
-  location: file
-  path: "/tmp/blueprint/${task_id}/portal_api_path.txt"
-  format: text
-  ports:
-    portal_handler:
-      type: file_path
-
-required_capabilities:
-  - python3.11
-
-resources:
-  cpu: 1
-  memory: "256Mi"
-  timeout: PT1H
-  locks: []
-
-files_to_create:
-  - src/outpost/functions/api/billing.py
-  - tests/unit/test_billing_api.py
-
-acceptance_criteria:
-  - "GET /billing/portal returns Stripe session URL"
-  - "Authenticated via API Key (maps to tenant)"
-  - "Redirects user to Stripe for card updates/plan changes"
-
-verification:
-  smoke:
-    command: "python3 -c 'from src.outpost.functions.api.billing import handler'"
-    timeout: PT10S
-  unit:
-    command: "python3 -m pytest tests/unit/test_billing_api.py -v"
+    command: "cd src && python -m pytest tests/unit/test_billing.py -v"
     timeout: PT2M
 
 rollback: "rm -f src/outpost/functions/api/billing.py"
 
-notes: |
-  Self-serve billing management.
+files_to_create:
+  - src/outpost/functions/api/billing.py
+  - src/outpost/functions/api/webhooks.py
+  - src/outpost/services/stripe_client.py
+  - tests/unit/test_billing.py
+```
+
+#### T3.1.1: Stripe Product Configuration
+
+```yaml
+task_id: T3.1.1
+name: "Configure Stripe products and prices"
+status: not_started
+dependencies: []
+
+interface:
+  input: "Tier structure"
+  output: "Stripe product and price IDs"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T3.1.1/output.json"
+  ports:
+    stripe_ids:
+      type: json
+
+acceptance_criteria:
+  - "Product: Outpost Pro"
+  - "Price: $29/month recurring"
+  - "Product: Outpost Enterprise"
+  - "Price: Custom (contact sales)"
+  - "Free tier has no Stripe product"
+  - "Price IDs stored in SSM Parameter Store"
+
+verification:
+  smoke:
+    command: "aws ssm get-parameter --profile soc --name /outpost/prod/stripe_pro_price_id --query 'Parameter.Value' --output text"
+    timeout: PT15S
+
+rollback: "aws ssm delete-parameter --profile soc --name /outpost/prod/stripe_pro_price_id"
+```
+
+#### T3.1.2: Subscription Handler
+
+```yaml
+task_id: T3.1.2
+name: "Implement subscription creation endpoint"
+status: not_started
+dependencies: [T3.1.1]
+
+interface:
+  input: "User ID, tier selection"
+  output: "Stripe checkout session URL"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T3.1.2/output.json"
+  ports:
+    handler_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Creates Stripe checkout session"
+  - "Passes user_id in metadata"
+  - "Redirects to success/cancel URLs"
+  - "Handles upgrade/downgrade"
+
+verification:
+  smoke:
+    command: "grep -q 'def create_subscription' src/outpost/functions/api/billing.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/functions/api/billing.py"
+```
+
+#### T3.1.3: Webhook Handler
+
+```yaml
+task_id: T3.1.3
+name: "Implement Stripe webhook handler"
+status: not_started
+dependencies: [T3.1.1]
+
+interface:
+  input: "Stripe webhook events"
+  output: "User tier updates"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T3.1.3/output.json"
+  ports:
+    handler_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Verifies webhook signature"
+  - "Handles: checkout.session.completed"
+  - "Handles: customer.subscription.updated"
+  - "Handles: customer.subscription.deleted"
+  - "Updates user tier in DynamoDB"
+  - "Returns 200 quickly (async processing)"
+
+verification:
+  smoke:
+    command: "grep -q 'def handle_webhook' src/outpost/functions/api/webhooks.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/functions/api/webhooks.py"
+```
+
+---
+
+### T3.2: Usage Metering & Quotas
+
+```yaml
+task_id: T3.2
+name: "Implement usage tracking and quota enforcement"
+status: not_started
+dependencies: [T2.3, T3.1]
+
+input_bindings:
+  worker:
+    source: T2.3
+    output_port: worker_path
+    transfer: file
+    required: true
+  billing:
+    source: T3.1
+    output_port: stripe_endpoints
+    transfer: file
+    required: true
+
+interface:
+  input: "Worker module, Billing endpoints"
+  output: "Usage tracking module"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T3.2/output.json"
+  ports:
+    metering_module:
+      type: file_path
+
+acceptance_criteria:
+  - "Records usage event on job completion"
+  - "Tracks: job_count, total_duration, executor_usage"
+  - "Enforces daily quotas: Free=10, Pro=100, Enterprise=unlimited"
+  - "Returns 429 when quota exceeded"
+  - "Quota resets daily at midnight UTC"
+  - "GET /v1/usage returns current period usage"
+
+verification:
+  smoke:
+    command: "test -f src/outpost/services/metering.py"
+    timeout: PT5S
+  unit:
+    command: "cd src && python -m pytest tests/unit/test_metering.py -v"
+    timeout: PT2M
+
+rollback: "rm -f src/outpost/services/metering.py"
+
+files_to_create:
+  - src/outpost/services/metering.py
+  - tests/unit/test_metering.py
+```
+
+#### T3.2.1: Usage Event Recording
+
+```yaml
+task_id: T3.2.1
+name: "Implement usage event recording"
+status: not_started
+dependencies: [T0.2.4]
+
+interface:
+  input: "Job completion event"
+  output: "Usage event in DynamoDB"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T3.2.1/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Records: user_id, timestamp, job_id, executor, duration_ms"
+  - "Atomic increment of daily counter"
+  - "Uses DynamoDB conditional writes"
+
+verification:
+  smoke:
+    command: "grep -q 'def record_usage' src/outpost/services/metering.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/services/metering.py"
+```
+
+#### T3.2.2: Quota Enforcement
+
+```yaml
+task_id: T3.2.2
+name: "Implement quota checking in job submission"
+status: not_started
+dependencies: [T3.2.1]
+
+interface:
+  input: "User tier, current usage"
+  output: "Allow/deny decision"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T3.2.2/output.json"
+  ports:
+    module_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Checks usage before job submission"
+  - "Returns 429 with retry-after header when over quota"
+  - "Includes usage stats in error response"
+  - "Enterprise tier bypasses quota check"
+
+verification:
+  smoke:
+    command: "grep -q 'def check_quota' src/outpost/services/metering.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/services/metering.py"
+```
+
+#### T3.2.3: Usage API Endpoint
+
+```yaml
+task_id: T3.2.3
+name: "Implement usage statistics endpoint"
+status: not_started
+dependencies: [T3.2.1]
+
+interface:
+  input: "User ID, date range"
+  output: "Usage statistics"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T3.2.3/output.json"
+  ports:
+    handler_path:
+      type: file_path
+
+acceptance_criteria:
+  - "GET /v1/usage returns current period stats"
+  - "Includes: jobs_today, jobs_remaining, tier, quota_resets_at"
+  - "Optional: historical usage by date range"
+
+verification:
+  smoke:
+    command: "grep -q 'def get_usage' src/outpost/functions/api/usage.py"
+    timeout: PT5S
+
+rollback: "git checkout src/outpost/functions/api/usage.py"
+```
+
+---
+
+## Tier 4: Testing & Deployment
+
+### T4.1: Integration Tests
+
+```yaml
+task_id: T4.1
+name: "Create integration test suite"
+status: not_started
+dependencies: [T3.2]
+
+input_bindings:
+  all_modules:
+    source: T3.2
+    output_port: metering_module
+    transfer: file
+    required: true
+
+interface:
+  input: "All implemented modules"
+  output: "Passing integration tests"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.1/output.json"
+  ports:
+    test_results:
+      type: json
+
+acceptance_criteria:
+  - "End-to-end: Register user → Get API key → Submit job → Poll status → Get results"
+  - "Quota enforcement: Exceed quota → 429 response"
+  - "Multi-tenant isolation: User A cannot access User B's jobs"
+  - "Scale-to-zero verification: No workers when queue empty"
+  - "Scale-up verification: Workers spawn when jobs submitted"
+
+verification:
+  smoke:
+    command: "test -d tests/integration/"
+    timeout: PT5S
+  integration:
+    command: "cd tests && python -m pytest integration/ -v --tb=short"
+    timeout: PT15M
+
+rollback: "rm -rf tests/integration/"
+
+files_to_create:
+  - tests/integration/test_e2e_flow.py
+  - tests/integration/test_quota_enforcement.py
+  - tests/integration/test_multi_tenant.py
+  - tests/integration/test_auto_scaling.py
+  - tests/integration/conftest.py
+```
+
+#### T4.1.1: E2E Flow Test
+
+```yaml
+task_id: T4.1.1
+name: "Create end-to-end flow integration test"
+status: not_started
+dependencies: [T1.2, T2.3]
+
+interface:
+  input: "API endpoints"
+  output: "Passing E2E test"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.1.1/output.json"
+  ports:
+    test_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Creates test user"
+  - "Generates API key"
+  - "Submits job to test repo"
+  - "Polls until completion"
+  - "Verifies output artifact exists"
+  - "Cleans up test data"
+
+verification:
+  smoke:
+    command: "test -f tests/integration/test_e2e_flow.py"
+    timeout: PT5S
+
+rollback: "rm -f tests/integration/test_e2e_flow.py"
+```
+
+#### T4.1.2: Multi-Tenant Isolation Test
+
+```yaml
+task_id: T4.1.2
+name: "Create multi-tenant isolation test"
+status: not_started
+dependencies: [T1.2]
+
+interface:
+  input: "API endpoints"
+  output: "Passing isolation test"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.1.2/output.json"
+  ports:
+    test_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Creates two test users"
+  - "User A submits job"
+  - "User B cannot GET User A's job"
+  - "User B cannot access User A's artifacts"
+  - "API keys are user-scoped"
+
+verification:
+  smoke:
+    command: "test -f tests/integration/test_multi_tenant.py"
+    timeout: PT5S
+
+rollback: "rm -f tests/integration/test_multi_tenant.py"
+```
+
+#### T4.1.3: Auto-Scaling Test
+
+```yaml
+task_id: T4.1.3
+name: "Create auto-scaling verification test"
+status: not_started
+dependencies: [T2.2.5]
+
+interface:
+  input: "ECS service, SQS queues"
+  output: "Passing scaling test"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.1.3/output.json"
+  ports:
+    test_path:
+      type: file_path
+
+acceptance_criteria:
+  - "Verifies desired count = 0 when queue empty"
+  - "Submits 5 jobs"
+  - "Verifies workers scale up within 60 seconds"
+  - "Jobs complete"
+  - "Verifies workers scale down to 0 after idle period"
+
+verification:
+  smoke:
+    command: "test -f tests/integration/test_auto_scaling.py"
+    timeout: PT5S
+
+rollback: "rm -f tests/integration/test_auto_scaling.py"
+```
+
+---
+
+### T4.2: Production Deployment
+
+```yaml
+task_id: T4.2
+name: "Deploy to production with terraform apply"
+status: not_started
+dependencies: [T4.1]
+
+input_bindings:
+  tests:
+    source: T4.1
+    output_port: test_results
+    transfer: file
+    required: true
+
+interface:
+  input: "Passing integration tests"
+  output: "Production deployment"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.2/output.json"
+  ports:
+    deployment:
+      type: json
+
+acceptance_criteria:
+  - "terraform plan shows expected changes"
+  - "terraform apply succeeds"
+  - "API Gateway endpoint accessible"
+  - "Health check returns 200"
+  - "No workers running (scale-to-zero verified)"
+  - "All CloudWatch alarms in OK state"
+
+verification:
+  smoke:
+    command: "curl -s -o /dev/null -w '%{http_code}' $(cd infrastructure/terraform && terraform output -raw api_gateway_url)/health | grep 200"
+    timeout: PT30S
+  integration:
+    command: "cd tests && python -m pytest integration/test_e2e_flow.py -v"
+    timeout: PT10M
+
+rollback: "cd infrastructure/terraform && terraform destroy -auto-approve"
+
+human_required:
+  action: "Approve production deployment"
+  reason: "Final review before applying infrastructure changes"
+  timeout: PT1H
+  on_timeout: abort
+
+resources:
+  locks:
+    - name: "terraform_state"
+      mode: exclusive
+```
+
+#### T4.2.1: Terraform Plan Review
+
+```yaml
+task_id: T4.2.1
+name: "Generate and review Terraform plan"
+status: not_started
+dependencies: [T4.1]
+
+interface:
+  input: "All Terraform modules"
+  output: "Terraform plan output"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.2.1/output.json"
+  ports:
+    plan_file:
+      type: file_path
+
+acceptance_criteria:
+  - "terraform plan succeeds"
+  - "No unexpected resource deletions"
+  - "Cost estimate < $50/month (idle scenario)"
+
+verification:
+  smoke:
+    command: "cd infrastructure/terraform && terraform plan -out=tfplan"
+    timeout: PT5M
+
+rollback: "rm -f infrastructure/terraform/tfplan"
+
+human_required:
+  action: "Review Terraform plan output"
+  reason: "Ensure no unexpected changes before apply"
+  timeout: PT1H
+  on_timeout: abort
+```
+
+#### T4.2.2: Apply Terraform
+
+```yaml
+task_id: T4.2.2
+name: "Apply Terraform configuration"
+status: not_started
+dependencies: [T4.2.1]
+
+interface:
+  input: "Approved Terraform plan"
+  output: "Deployed resources"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.2.2/output.json"
+  ports:
+    outputs:
+      type: json
+
+acceptance_criteria:
+  - "terraform apply succeeds"
+  - "All resources created"
+  - "Outputs captured: API URL, cluster ARN, etc."
+
+verification:
+  smoke:
+    command: "cd infrastructure/terraform && terraform output -json"
+    timeout: PT30S
+
+rollback: "cd infrastructure/terraform && terraform destroy -auto-approve"
+
+resources:
+  locks:
+    - name: "terraform_state"
+      mode: exclusive
+```
+
+#### T4.2.3: Post-Deployment Verification
+
+```yaml
+task_id: T4.2.3
+name: "Verify production deployment"
+status: not_started
+dependencies: [T4.2.2]
+
+interface:
+  input: "Deployed resources"
+  output: "Verification report"
+
+output:
+  location: file
+  path: "/tmp/blueprint/T4.2.3/output.json"
+  ports:
+    verification_report:
+      type: json
+
+acceptance_criteria:
+  - "API Gateway health check returns 200"
+  - "DynamoDB tables accessible"
+  - "SQS queues exist"
+  - "ECS cluster active with 0 running tasks"
+  - "CloudWatch log groups created"
+  - "No critical CloudWatch alarms"
+
+verification:
+  smoke:
+    command: "curl -s $(cd infrastructure/terraform && terraform output -raw api_gateway_url)/health"
+    timeout: PT30S
+  unit:
+    command: "aws ecs describe-clusters --profile soc --clusters outpost-workers --query 'clusters[0].runningTasksCount' --output text | grep 0"
+    timeout: PT15S
+
+rollback: "echo 'Manual investigation required'"
 ```
 
 ---
@@ -1401,115 +2279,172 @@ notes: |
 
 ```yaml
 dependency_graph:
-  # Tier 0: Foundation
+  # Tier 0
   T0.1:
     depends_on: []
+  T0.1.1:
+    depends_on: []
+  T0.1.2:
+    depends_on: [T0.1.1]
+  T0.1.3:
+    depends_on: [T0.1.1, T0.1.2]
   T0.2:
     depends_on: [T0.1]
-    input_bindings:
-      schema: T0.1.output.schema
+  T0.2.1:
+    depends_on: [T0.1.3]
+  T0.2.2:
+    depends_on: [T0.1.3]
+  T0.2.3:
+    depends_on: [T0.1.3]
+  T0.2.4:
+    depends_on: [T0.1.3]
+  T0.2.5:
+    depends_on: [T0.2.1, T0.2.2, T0.2.3, T0.2.4]
   T0.3:
     depends_on: [T0.1]
-    input_bindings:
-      schema: T0.1.output.schema
-  T0.4:
-    depends_on: [T0.3]
-    input_bindings:
-      models_module: T0.3.output.models_module
+  T0.3.1:
+    depends_on: [T0.1.3]
+  T0.3.2:
+    depends_on: [T0.3.1]
+  T0.3.3:
+    depends_on: [T0.3.1, T0.3.2]
 
-  # Tier 1: Auth Layer
+  # Tier 1
   T1.1:
-    depends_on: [T0.3, T0.4]
-    input_bindings:
-      models_module: T0.3.output.models_module
-      secrets_client: T0.4.output.secrets_client
-  T1.2:
-    depends_on: [T0.2, T0.3, T1.1]
-    input_bindings:
-      models_module: T0.3.output.models_module
-      lambda_handler: T1.1.output.lambda_handler
-  T1.3:
-    depends_on: [T1.1, T1.2]
-    input_bindings:
-      lambda_handler: T1.1.output.lambda_handler
-      api_handlers: T1.2.output.api_handlers
-  T1.4:
     depends_on: [T0.2, T0.3]
-    input_bindings:
-      models_module: T0.3.output.models_module
-    parallel_group: "services"
+  T1.1.1:
+    depends_on: [T0.2.5]
+  T1.1.2:
+    depends_on: [T1.1.1]
+  T1.1.3:
+    depends_on: [T0.2.5]
+  T1.1.4:
+    depends_on: [T1.1.1, T1.1.2, T1.1.3]
+  T1.2:
+    depends_on: [T1.1]
+  T1.2.1:
+    depends_on: [T0.2.5]
+  T1.2.2:
+    depends_on: [T0.2.5]
+  T1.2.3:
+    depends_on: [T1.2.2]
 
-  # Tier 2: Job Processing
+  # Tier 2
   T2.1:
-    depends_on: [T0.2]
-    input_bindings:
-      dynamodb_module: T0.2.output.module_path
+    depends_on: [T0.1]
+  T2.1.1:
+    depends_on: [T0.1.3]
+  T2.1.2:
+    depends_on: [T2.1.1]
   T2.2:
-    depends_on: [T1.1, T1.4, T2.1]
-    input_bindings:
-      lambda_handler: T1.1.output.lambda_handler
-      audit_service: T1.4.output.audit_service
+    depends_on: [T2.1, T0.3]
+  T2.2.1:
+    depends_on: []
+  T2.2.2:
+    depends_on: [T0.1.3]
+  T2.2.3:
+    depends_on: [T2.2.1, T2.2.2]
+  T2.2.4:
+    depends_on: [T2.2.3]
+  T2.2.5:
+    depends_on: [T2.2.4, T2.1.2]
   T2.3:
-    depends_on: [T0.4, T2.1]
-    input_bindings:
-      secrets_client: T0.4.output.secrets_client
-      sqs_module: T2.1.output.module_path
-  T2.4:
-    depends_on: [T0.3, T0.4, T1.4, T2.2, T2.3]
-    input_bindings:
-      models_module: T0.3.output.models_module
-      secrets_client: T0.4.output.secrets_client
-      audit_service: T1.4.output.audit_service
-  T2.5:
-    depends_on: [T2.1, T2.3]
-    input_bindings:
-      sqs_module: T2.1.output.module_path
-      ecs_module: T2.3.output.module_path
+    depends_on: [T2.2]
+  T2.3.1:
+    depends_on: [T2.1.2]
+  T2.3.2:
+    depends_on: [T2.3.1]
+  T2.3.3:
+    depends_on: [T0.1.3]
 
-  # Tier 3: Billing
+  # Tier 3
   T3.1:
-    depends_on: [T0.3]
-    input_bindings:
-      models_module: T0.3.output.models_module
+    depends_on: [T1.2]
+  T3.1.1:
+    depends_on: []
+  T3.1.2:
+    depends_on: [T3.1.1]
+  T3.1.3:
+    depends_on: [T3.1.1]
   T3.2:
-    depends_on: [T2.4, T3.1]
-    input_bindings:
-      worker_module: T2.4.output.worker_module
-      stripe_service: T3.1.output.stripe_service
-  T3.3:
-    depends_on: [T3.1, T3.2]
-    input_bindings:
-      stripe_service: T3.1.output.stripe_service
-  T3.4:
-    depends_on: [T3.1]
-    input_bindings:
-      stripe_service: T3.1.output.stripe_service
+    depends_on: [T2.3, T3.1]
+  T3.2.1:
+    depends_on: [T0.2.4]
+  T3.2.2:
+    depends_on: [T3.2.1]
+  T3.2.3:
+    depends_on: [T3.2.1]
+
+  # Tier 4
+  T4.1:
+    depends_on: [T3.2]
+  T4.1.1:
+    depends_on: [T1.2, T2.3]
+  T4.1.2:
+    depends_on: [T1.2]
+  T4.1.3:
+    depends_on: [T2.2.5]
+  T4.2:
+    depends_on: [T4.1]
+  T4.2.1:
+    depends_on: [T4.1]
+  T4.2.2:
+    depends_on: [T4.2.1]
+  T4.2.3:
+    depends_on: [T4.2.2]
 ```
 
-### Visual Representation
+---
+
+## Visual Dependency Graph
 
 ```
-T0.1 (DynamoDB Schema)
-  │
-  ├──► T0.2 (Terraform DynamoDB) ──► T2.1 (SQS Queues)
-  │                                      │
-  └──► T0.3 (Pydantic Models)            ├──► T2.3 (ECS Task Def) ──► T2.5 (Auto-Scaling)
-         │                               │         │
-         └──► T0.4 (Secrets Manager) ────┴─────────┤
-               │                                   │
-               ├──► T1.1 (Auth Lambda) ────────────┤
-               │         │                         │
-               │         └──► T1.2 (Tenant API)    │
-               │                   │               │
-               │                   └──► T1.3 (API GW)
-               │
-               └──► T1.4 (Audit Service) ──► T2.2 (Job API) ──► T2.4 (Worker) ──► T3.2 (Metering)
-                                                                     │
-                                                                     ▼
-T3.1 (Stripe Client) ───────────────────────────────────────────────────────────► T3.3 (Webhook)
-  │
-  └──► T3.4 (Billing Portal)
+Tier 0: Foundation
+T0.1.1 ──► T0.1.2 ──► T0.1.3 ──┬──► T0.2.1 ─┐
+                               ├──► T0.2.2 ─┼──► T0.2.5
+                               ├──► T0.2.3 ─┤
+                               ├──► T0.2.4 ─┘
+                               ├──► T0.3.1 ──► T0.3.2 ──► T0.3.3
+                               └──► T2.1.1 ──► T2.1.2
+
+Tier 1: Auth & API
+T0.2.5 ──┬──► T1.1.1 ──► T1.1.2 ─┐
+         ├──► T1.1.3 ────────────┼──► T1.1.4 ──► T1.2
+         └──► T1.2.1                             │
+              T1.2.2 ──► T1.2.3 ◄────────────────┘
+
+Tier 2: Queue & Workers
+T2.1.2 ──┬──► T2.3.1 ──► T2.3.2
+         └──► T2.2.5 ◄── T2.2.4 ◄── T2.2.3 ◄── T2.2.1 + T2.2.2
+
+Tier 3: Billing & Metering
+T3.1.1 ──┬──► T3.1.2
+         └──► T3.1.3 ──► T3.2 ◄── T3.2.1 ──┬──► T3.2.2
+                                           └──► T3.2.3
+
+Tier 4: Testing & Deployment
+T3.2 ──► T4.1 ──┬──► T4.1.1
+                ├──► T4.1.2
+                └──► T4.1.3 ──► T4.2.1 ──► T4.2.2 ──► T4.2.3
 ```
+
+---
+
+## Cost Estimate (Idle vs Active)
+
+| Component | Idle (no jobs) | 100 jobs/day | 1000 jobs/day |
+|-----------|---------------|--------------|---------------|
+| API Gateway | $0 | $1 | $5 |
+| Lambda | $0 | $2 | $10 |
+| DynamoDB | $1 | $5 | $25 |
+| SQS | $0 | $0.50 | $2 |
+| ECS Fargate | **$0** | $30 | $150 |
+| Secrets Manager | $1 | $2 | $5 |
+| S3 | $1 | $3 | $15 |
+| CloudWatch | $2 | $5 | $20 |
+| **Total** | **~$5/mo** | **~$48/mo** | **~$232/mo** |
+
+**Critical:** Fargate is $0 when no tasks running. Scale-to-zero is enforced.
 
 ---
 
@@ -1517,20 +2452,9 @@ T3.1 (Stripe Client) ───────────────────�
 
 | Version | Date | Author | Changes |
 |---------|------|--------|---------|
-| 2.1.0 | 2026-01-08 | Gemini | Added Tier 3 Billing Integration |
-| 2.0.1 | 2026-01-08 | Claude Opus | Initial draft - Tiers 0-2 |
+| 1.0.0 | 2026-01-11 | Claude Opus 4.5 | Initial depth=3 blueprint |
 
 ---
 
-## Future Tiers (T4+) — Not Generated
-
-The following tiers are planned but not included in this depth-3 Blueprint:
-
-- **T4: Observability** — CloudWatch dashboards, X-Ray tracing, alerting, SLO monitoring
-- **T5: Security Hardening** — WAF rules, VPC endpoints, encryption at rest, penetration testing
-- **T6: Operations** — CI/CD pipelines, blue/green deployment, disaster recovery, runbooks
-
----
-
-*Blueprint Standard Format v2.0.1*
-*"Universal AI Orchestration Contract"*
+*Outpost V2 Multi-Tenant SaaS Blueprint — Generated 2026-01-11*
+*"Pay-per-use infrastructure with scale-to-zero economics"*
