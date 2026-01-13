@@ -69,7 +69,7 @@ export class TenantRepository {
     const result = await docClient.send(
       new GetCommand({
         TableName: this.tableName,
-        Key: { tenantId },
+        Key: { tenant_id: tenantId, sk: 'TENANT' }, // Use snake_case key and sort key
       })
     );
 
@@ -86,7 +86,7 @@ export class TenantRepository {
     const result = await docClient.send(
       new UpdateCommand({
         TableName: this.tableName,
-        Key: { tenantId },
+        Key: { tenant_id: tenantId, sk: 'TENANT' }, // Use snake_case key and sort key
         UpdateExpression:
           'SET currentUsage.concurrentJobs = currentUsage.concurrentJobs + :inc, ' +
           'currentUsage.jobsToday = currentUsage.jobsToday + :inc',
@@ -109,7 +109,7 @@ export class TenantRepository {
     const result = await docClient.send(
       new UpdateCommand({
         TableName: this.tableName,
-        Key: { tenantId },
+        Key: { tenant_id: tenantId, sk: 'TENANT' }, // Use snake_case key and sort key
         UpdateExpression: 'SET currentUsage.concurrentJobs = currentUsage.concurrentJobs - :dec',
         ConditionExpression: 'currentUsage.concurrentJobs > :zero',
         ExpressionAttributeValues: { ':dec': 1, ':zero': 0 },
@@ -136,7 +136,7 @@ export class TenantRepository {
     await docClient.send(
       new UpdateCommand({
         TableName: this.tableName,
-        Key: { tenantId },
+        Key: { tenant_id: tenantId, sk: 'TENANT' }, // Use snake_case key and sort key
         UpdateExpression:
           'SET currentUsage.jobsToday = :zero, currentUsage.lastResetDate = :today',
         ExpressionAttributeValues: { ':zero': 0, ':today': today },
@@ -150,7 +150,7 @@ export class TenantRepository {
     await docClient.send(
       new UpdateCommand({
         TableName: this.tableName,
-        Key: { tenantId },
+        Key: { tenant_id: tenantId, sk: 'TENANT' }, // Use snake_case key and sort key
         UpdateExpression: 'SET stripeCustomerId = :customerId, updatedAt = :now',
         ExpressionAttributeValues: {
           ':customerId': stripeCustomerId,

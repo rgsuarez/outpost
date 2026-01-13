@@ -69,7 +69,7 @@ export const DEFAULT_USAGE_LIMITS: Record<TenantTier, TenantModel['usageLimits']
  */
 export function fromDynamoItem(item: Record<string, unknown>): TenantModel {
   return TenantSchema.parse({
-    tenantId: item['tenantId'],
+    tenantId: item['tenantId'] || item['tenant_id'], // Support both camelCase and snake_case
     name: item['name'],
     email: item['email'],
     tier: item['tier'],
@@ -87,7 +87,9 @@ export function fromDynamoItem(item: Record<string, unknown>): TenantModel {
  */
 export function toDynamoItem(tenant: TenantModel): Record<string, unknown> {
   return {
-    tenantId: tenant.tenantId,
+    tenant_id: tenant.tenantId, // snake_case for DynamoDB key
+    sk: 'TENANT', // Sort key for single-table design
+    tenantId: tenant.tenantId, // Also include camelCase for compatibility
     name: tenant.name,
     email: tenant.email,
     tier: tenant.tier,
