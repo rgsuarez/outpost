@@ -105,9 +105,11 @@ function getFlagshipModel(agent: AgentType): ModelConfig {
 
 /**
  * Builds the ECS task definition ARN for an agent
+ * Note: Omitting revision number allows ECS to use the latest ACTIVE revision
  */
 function buildTaskDefinitionArn(agent: AgentType): string {
-  return `arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/outpost-${agent}:latest`;
+  const env = process.env['ENVIRONMENT'] ?? 'dev';
+  return `arn:aws:ecs:${AWS_REGION}:${AWS_ACCOUNT_ID}:task-definition/outpost-${env}-${agent}`;
 }
 
 /**

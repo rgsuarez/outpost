@@ -68,7 +68,7 @@ resource "aws_ecs_task_definition" "agent" {
 
   runtime_platform {
     operating_system_family = "LINUX"
-    cpu_architecture        = "ARM64" # Cost optimized
+    cpu_architecture        = "X86_64" # Worker images built for AMD64
   }
 
   container_definitions = jsonencode([

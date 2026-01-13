@@ -48,7 +48,7 @@ export interface SecretInjectionResult {
  */
 const AWS_ACCOUNT_ID = '311493921645';
 const AWS_REGION = 'us-east-1';
-const SECRET_PATH_PREFIX = '/outpost/secrets';
+const SECRET_PATH_PREFIX = '/outpost/api-keys';
 const USER_SECRET_PATH_PREFIX = '/outpost/users';
 
 /**
@@ -58,23 +58,23 @@ const USER_SECRET_PATH_PREFIX = '/outpost/users';
 const AGENT_SECRET_MAPPINGS: Readonly<Record<AgentType, AgentSecretMapping>> = {
   claude: {
     envVar: 'ANTHROPIC_API_KEY',
-    secretPath: `${SECRET_PATH_PREFIX}/anthropic-api-key`,
+    secretPath: `${SECRET_PATH_PREFIX}/anthropic`,
   },
   codex: {
     envVar: 'OPENAI_API_KEY',
-    secretPath: `${SECRET_PATH_PREFIX}/openai-api-key`,
+    secretPath: `${SECRET_PATH_PREFIX}/openai`,
   },
   gemini: {
     envVar: 'GOOGLE_API_KEY',
-    secretPath: `${SECRET_PATH_PREFIX}/google-api-key`,
+    secretPath: `${SECRET_PATH_PREFIX}/google`,
   },
   aider: {
     envVar: 'DEEPSEEK_API_KEY',
-    secretPath: `${SECRET_PATH_PREFIX}/deepseek-api-key`,
+    secretPath: `${SECRET_PATH_PREFIX}/deepseek`,
   },
   grok: {
     envVar: 'XAI_API_KEY',
-    secretPath: `${SECRET_PATH_PREFIX}/xai-api-key`,
+    secretPath: `${SECRET_PATH_PREFIX}/xai`,
   },
 } as const;
 

@@ -173,6 +173,26 @@ variable "audit_table_arn" {
   type        = string
 }
 
+variable "api_keys_table_name" {
+  description = "Name of the DynamoDB API keys table"
+  type        = string
+}
+
+variable "api_keys_table_arn" {
+  description = "ARN of the DynamoDB API keys table"
+  type        = string
+}
+
+variable "dispatches_table_name" {
+  description = "Name of the DynamoDB dispatches table"
+  type        = string
+}
+
+variable "dispatches_table_arn" {
+  description = "ARN of the DynamoDB dispatches table"
+  type        = string
+}
+
 # -----------------------------------------------------------------------------
 # S3 Configuration
 # -----------------------------------------------------------------------------

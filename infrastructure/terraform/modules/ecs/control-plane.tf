@@ -52,9 +52,14 @@ resource "aws_ecs_task_definition" "control_plane" {
         { name = "DYNAMODB_JOBS_TABLE", value = var.jobs_table_name },
         { name = "DYNAMODB_TENANTS_TABLE", value = var.tenants_table_name },
         { name = "DYNAMODB_AUDIT_TABLE", value = var.audit_table_name },
+        { name = "DYNAMODB_API_KEYS_TABLE", value = var.api_keys_table_name },
         { name = "SQS_JOBS_QUEUE_URL", value = var.jobs_queue_url },
         { name = "S3_RESULTS_BUCKET", value = var.results_bucket_name },
-        { name = "EFS_FILE_SYSTEM_ID", value = var.efs_file_system_id }
+        { name = "S3_OUTPUT_BUCKET", value = var.results_bucket_name },
+        { name = "EFS_FILE_SYSTEM_ID", value = var.efs_file_system_id },
+        { name = "ECS_CLUSTER_ARN", value = "arn:aws:ecs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:cluster/outpost-${var.environment}" },
+        { name = "ECS_WORKER_SUBNET_IDS", value = join(",", var.private_subnet_ids) },
+        { name = "ECS_WORKER_SECURITY_GROUP", value = aws_security_group.control_plane.id }
       ]
 
       logConfiguration = {
@@ -152,7 +157,11 @@ resource "aws_iam_role_policy" "control_plane_dynamodb" {
           var.tenants_table_arn,
           "${var.tenants_table_arn}/index/*",
           var.audit_table_arn,
-          "${var.audit_table_arn}/index/*"
+          "${var.audit_table_arn}/index/*",
+          var.api_keys_table_arn,
+          "${var.api_keys_table_arn}/index/*",
+          var.dispatches_table_arn,
+          "${var.dispatches_table_arn}/index/*"
         ]
       }
     ]
@@ -240,6 +249,83 @@ resource "aws_iam_role_policy" "control_plane_efs" {
           "elasticfilesystem:DescribeAccessPoints"
         ]
         Resource = "*"
+      }
+    ]
+  })
+}
+
+# ECS access for control plane (launch worker tasks)
+resource "aws_iam_role_policy" "control_plane_ecs" {
+  name = "ecs-access"
+  role = aws_iam_role.control_plane_task.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "ecs:RunTask",
+          "ecs:StopTask",
+          "ecs:DescribeTasks",
+          "ecs:ListTasks"
+        ]
+        Resource = "*"
+        Condition = {
+          ArnEquals = {
+            "ecs:cluster" = "arn:aws:ecs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:cluster/outpost-${var.environment}"
+          }
+        }
+      },
+      {
+        Effect   = "Allow"
+        Action   = "ecs:TagResource"
+        Resource = "arn:aws:ecs:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:task/outpost-${var.environment}/*"
+      },
+      {
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = [
+          aws_iam_role.execution.arn,
+          aws_iam_role.task.arn
+        ]
+      }
+    ]
+  })
+}
+
+# EventBridge access for cost event emission
+resource "aws_iam_role_policy" "control_plane_eventbridge" {
+  name = "eventbridge-access"
+  role = aws_iam_role.control_plane_task.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect   = "Allow"
+        Action   = "events:PutEvents"
+        Resource = "arn:aws:events:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:event-bus/outpost-events"
+      }
+    ]
+  })
+}
+
+# Secrets Manager access for secret validation
+resource "aws_iam_role_policy" "control_plane_secrets" {
+  name = "secrets-manager-access"
+  role = aws_iam_role.control_plane_task.name
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Action = [
+          "secretsmanager:DescribeSecret",
+          "secretsmanager:GetSecretValue"
+        ]
+        Resource = "arn:aws:secretsmanager:${data.aws_region.current.id}:${data.aws_caller_identity.current.account_id}:secret:/outpost/*"
       }
     ]
   })

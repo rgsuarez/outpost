@@ -67,12 +67,7 @@ resource "aws_iam_role_policy" "execution_secrets" {
         Action = [
           "kms:Decrypt"
         ]
-        Resource = "*"
-        Condition = {
-          StringEquals = {
-            "kms:ViaService" = "secretsmanager.*.amazonaws.com"
-          }
-        }
+        Resource = var.kms_key_arn != "" ? [var.kms_key_arn] : ["*"]
       }
     ]
   })

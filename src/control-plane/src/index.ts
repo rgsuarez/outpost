@@ -11,6 +11,9 @@ import { requestLogger } from './api/middleware/request-logger.middleware.js';
 import { errorHandler } from './api/middleware/error.middleware.js';
 import { jobRouter } from './api/routes/job.routes.js';
 import { healthRouter } from './api/routes/health.routes.js';
+import { dispatchRouter } from './api/routes/dispatch.routes.js';
+import { workspaceRouter } from './api/routes/workspace.routes.js';
+import { artifactsRouter } from './api/routes/artifacts.routes.js';
 
 // Initialize logger and config
 const logger = getLogger();
@@ -30,6 +33,9 @@ app.use(requestLogger);
 // Routes
 app.use('/health', healthRouter);
 app.use('/api/v2/jobs', jobRouter);
+app.use('/dispatch', dispatchRouter);
+app.use('/workspaces', workspaceRouter);
+app.use('/artifacts', artifactsRouter);
 
 // Root endpoint
 app.get('/', (_req, res) => {

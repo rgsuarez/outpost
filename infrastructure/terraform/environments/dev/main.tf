@@ -110,12 +110,16 @@ module "ecs" {
   jobs_queue_arn = module.sqs.jobs_queue_arn
 
   # DynamoDB configuration
-  jobs_table_name    = module.dynamodb.jobs_table_name
-  jobs_table_arn     = module.dynamodb.jobs_table_arn
-  tenants_table_name = module.dynamodb.tenants_table_name
-  tenants_table_arn  = module.dynamodb.tenants_table_arn
-  audit_table_name   = module.dynamodb.audit_table_name
-  audit_table_arn    = module.dynamodb.audit_table_arn
+  jobs_table_name       = module.dynamodb.jobs_table_name
+  jobs_table_arn        = module.dynamodb.jobs_table_arn
+  tenants_table_name    = module.dynamodb.tenants_table_name
+  tenants_table_arn     = module.dynamodb.tenants_table_arn
+  audit_table_name      = module.dynamodb.audit_table_name
+  audit_table_arn       = module.dynamodb.audit_table_arn
+  api_keys_table_name   = module.dynamodb.api_keys_table_name
+  api_keys_table_arn    = module.dynamodb.api_keys_table_arn
+  dispatches_table_name = module.dynamodb.dispatches_table_name
+  dispatches_table_arn  = module.dynamodb.dispatches_table_arn
 
   # S3 configuration
   results_bucket_name = module.s3.bucket_name
@@ -123,8 +127,8 @@ module "ecs" {
   # Secrets configuration
   kms_key_arn = module.secrets.kms_key_arn
 
-  # EFS configuration
-  enable_efs          = true
+  # EFS configuration (disabled temporarily - needs worker security group fix)
+  enable_efs          = false
   efs_file_system_id  = module.efs.filesystem_id
   efs_access_point_id = module.efs.root_access_point_id
 

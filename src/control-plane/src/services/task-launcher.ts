@@ -215,8 +215,9 @@ export class TaskLauncherService {
     const environment = this.buildEnvironmentVariables(request, taskSelection);
 
     // Build container overrides (environment and resources only, secrets are in task definition)
+    // Note: Container name matches the agent name in the task definition
     const containerOverride: ContainerOverride = {
-      name: AGENT_CONTAINER_NAME,
+      name: request.agent,
       environment,
       cpu: taskSelection.cpu,
       memory: taskSelection.memory,
