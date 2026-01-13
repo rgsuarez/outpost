@@ -25,13 +25,16 @@ const app = express();
 // Trust proxy (for X-Forwarded-* headers in AWS)
 app.set('trust proxy', true);
 
-// Middleware
+// Health check routes BEFORE middleware (fast path for ALB health checks)
+// This bypasses JSON parsing, URL encoding, and request logging
+app.use('/health', healthRouter);
+
+// Middleware (applied to all other routes)
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 app.use(requestLogger);
 
 // Routes
-app.use('/health', healthRouter);
 app.use('/api/v2/jobs', jobRouter);
 app.use('/dispatch', dispatchRouter);
 app.use('/workspaces', workspaceRouter);

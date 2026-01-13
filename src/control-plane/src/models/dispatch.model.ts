@@ -31,6 +31,7 @@ export const CreateDispatchSchema = z.object({
     .string()
     .min(10, 'Task must be at least 10 characters')
     .max(50000, 'Task must not exceed 50000 characters'),
+  modelId: z.string().optional(),
   repo: z
     .string()
     .regex(/^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_.-]+$/, 'Invalid repository format (owner/repo)')

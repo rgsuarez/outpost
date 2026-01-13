@@ -41,6 +41,9 @@ export class DispatchHandler {
       };
 
       // Add optional properties only if defined
+      if (input.modelId !== undefined) {
+        (dispatchRequest as { modelId: string }).modelId = input.modelId;
+      }
       if (input.repo !== undefined) {
         (dispatchRequest as { repoUrl: string }).repoUrl = `https://github.com/${input.repo}`;
       }
