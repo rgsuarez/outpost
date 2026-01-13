@@ -430,32 +430,19 @@ export class DispatchRepository {
     const docClient = getDocClient();
     const sinceTime = new Date(Date.now() - sinceHoursAgo * 60 * 60 * 1000);
 
-    // Scan with time filter (Note: for production scale, use a GSI on started_at)
+    // Use Scan with time filter
+    // Note: For production scale, use a GSI on started_at
     // This is acceptable for health checks due to 30-second caching
+    const { ScanCommand } = await import('@aws-sdk/lib-dynamodb');
     const result = await docClient.send(
-      new QueryCommand({
+      new ScanCommand({
         TableName: this.tableName,
-        // Use scan-like query by querying all users (requires GSI adjustment for scale)
-        // For now, use simple scan with filter - cached metrics make this acceptable
-        KeyConditionExpression: undefined,
         FilterExpression: 'started_at >= :sinceTime',
         ExpressionAttributeValues: {
           ':sinceTime': sinceTime.toISOString(),
         },
-      } as unknown as QueryCommandInput)
-    ).catch(async () => {
-      // Fallback: Scan the table if query fails (GSI may not exist)
-      const { ScanCommand } = await import('@aws-sdk/lib-dynamodb');
-      return docClient.send(
-        new ScanCommand({
-          TableName: this.tableName,
-          FilterExpression: 'started_at >= :sinceTime',
-          ExpressionAttributeValues: {
-            ':sinceTime': sinceTime.toISOString(),
-          },
-        })
-      );
-    });
+      })
+    );
 
     const items = (result.Items ?? []).map((item) => fromDynamoItem(item));
 
