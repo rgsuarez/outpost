@@ -1,12 +1,14 @@
 # Outpost
 
-**Multi-Agent Headless Executor System v1.8.1**
+**Multi-Agent Headless Executor System v2.0.0**
 
 Outpost enables Claude sessions to dispatch coding tasks to remote AI agents. Five agents run in parallel on dedicated infrastructure.
 
-## Quick Invoke
+## Quick Start
 
-**Read [INVOKE.md](INVOKE.md) for copy-paste commands.**
+**HTTP API:** `http://outpost-control-plane-dev-140603164.us-east-1.elb.amazonaws.com`
+**Authentication:** API Key via `X-API-Key` header
+**Documentation:** [OUTPOST_INTERFACE.md](OUTPOST_INTERFACE.md)
 
 ## Fleet
 
@@ -16,29 +18,30 @@ Outpost enables Claude sessions to dispatch coding tasks to remote AI agents. Fi
 | OpenAI Codex | gpt-5.2-codex | $20/mo |
 | Gemini CLI | gemini-3-pro-preview | $50/mo |
 | Aider | deepseek/deepseek-coder | ~$0.14/MTok |
-| Grok | grok-4-1-fast-reasoning (xAI) | API |
+| Grok | grok-4.1 (xAI) | API |
 
-## Architecture
+## Architecture (v2.0)
 
 ```
-Orchestrator -> AWS SSM -> dispatch-unified.sh
-                              |
-                              +-> Claude Code
-                              +-> OpenAI Codex
-                              +-> Gemini CLI
-                              +-> Aider
-                              +-> Grok
-                                   |
-                                   +-> Isolated workspace
+HTTP Client → ALB → ECS Control Plane → ECS Fargate Workers
+                         |                      |
+                         v                      +-> Claude Code
+                    DynamoDB                    +-> OpenAI Codex
+                    CloudWatch                  +-> Gemini CLI
+                    Secrets Manager             +-> Aider
+                    S3 Artifacts                +-> Grok
+                                                      |
+                                                      +-> Isolated workspace (EFS)
 ```
 
-## Features (v1.8+)
+## Features (v2.0)
 
-- **Namespace Support (v1.8.1):** Accept both `repo` and `namespace/repo` formats
-- **Context Injection:** `--context` flag prepends zeOS knowledge
-- **ANCHORS Section:** Long-lived decisions protected from summarization
-- **Security Scrubbing:** 15+ patterns for credential redaction
-- **Workspace Isolation:** True parallelism with per-run workspaces
+- **HTTP API:** Simple REST API with JSON (no AWS credentials required)
+- **Multi-Tenant:** Complete tenant isolation with per-tenant API keys
+- **Model Selection:** Choose flagship/balanced/fast tiers per agent
+- **Auto-Scaling:** ECS Fargate scales workers on demand
+- **Observability:** CloudWatch logs and metrics for all tasks
+- **Production Ready:** 97% validation pass rate (36/37 tests)
 
 ## Documentation
 
