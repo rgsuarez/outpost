@@ -8,8 +8,10 @@
 
 set -euo pipefail
 
-# Source the agent initialization script
+# Source the agent initialization script and run main()
+# main() handles environment validation, configuration, and TASK execution
 source /opt/agents/gemini/init.sh
+main
 
-# Execute the command passed to the container
+# If main() returns (no TASK set), execute the default command
 exec "$@"
