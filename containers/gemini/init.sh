@@ -161,7 +161,8 @@ main() {
         cd "${WORKSPACE_DIR:-/workspace}"
 
         # Execute Gemini with task in yolo mode (autonomous, no prompts)
-        exec gemini --yolo "${TASK}"
+        # Gemini CLI requires --prompt flag for task input
+        exec gemini --yolo --prompt "${TASK}"
     fi
 
     return 0
