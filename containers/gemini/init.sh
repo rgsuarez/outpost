@@ -48,6 +48,11 @@ validate_api_key() {
         log_warn "GOOGLE_API_KEY may have non-standard format (expected AI* prefix)"
     fi
 
+    # Gemini CLI expects GEMINI_API_KEY, not GOOGLE_API_KEY
+    # Export alias to maintain compatibility
+    export GEMINI_API_KEY="${GOOGLE_API_KEY}"
+    log_info "GEMINI_API_KEY aliased to GOOGLE_API_KEY for CLI compatibility"
+
     return 0
 }
 
