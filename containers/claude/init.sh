@@ -130,6 +130,14 @@ export GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-claude@outpost.zeroechelon.com}"
 export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Outpost Claude Agent}"
 export GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-claude@outpost.zeroechelon.com}"
 
+# GitHub token configuration for private repository access
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    log_info "GITHUB_TOKEN detected - configuring git for private repo access"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+    log_success "Git configured for authenticated GitHub access"
+fi
+
 # Workspace configuration
 export WORKSPACE_DIR="${WORKSPACE_DIR:-/workspace}"
 

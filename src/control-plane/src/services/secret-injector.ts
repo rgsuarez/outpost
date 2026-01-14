@@ -79,6 +79,17 @@ const AGENT_SECRET_MAPPINGS: Readonly<Record<AgentType, AgentSecretMapping>> = {
 } as const;
 
 /**
+ * Common secrets injected into all agents
+ * These are shared across all agent types (e.g., GitHub access for private repos)
+ */
+const COMMON_SECRETS: readonly AgentSecretMapping[] = [
+  {
+    envVar: 'GITHUB_TOKEN',
+    secretPath: `${SECRET_PATH_PREFIX}/github`,
+  },
+] as const;
+
+/**
  * Constructs a Secrets Manager ARN from a secret path
  */
 function buildSecretArn(secretPath: string, region: string = AWS_REGION): string {
@@ -140,6 +151,16 @@ export class SecretInjectorService {
       valueFrom: primaryArn,
     });
     secretPathsToValidate.push(agentMapping.secretPath);
+
+    // Add common secrets (shared across all agents)
+    for (const commonSecret of COMMON_SECRETS) {
+      const commonArn = buildSecretArn(commonSecret.secretPath, this.region);
+      secrets.push({
+        name: commonSecret.envVar,
+        valueFrom: commonArn,
+      });
+      secretPathsToValidate.push(commonSecret.secretPath);
+    }
 
     // Add user-specific secrets if userId provided
     if (userId !== undefined) {
@@ -354,4 +375,4 @@ export function resetSecretInjectorService(): void {
 /**
  * Export constants for external use
  */
-export { AGENT_SECRET_MAPPINGS, SECRET_PATH_PREFIX, USER_SECRET_PATH_PREFIX, buildSecretArn };
+export { AGENT_SECRET_MAPPINGS, COMMON_SECRETS, SECRET_PATH_PREFIX, USER_SECRET_PATH_PREFIX, buildSecretArn };

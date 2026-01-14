@@ -115,6 +115,16 @@ export_agent_metadata() {
     export OUTPOST_AGENT_MODELS="${SUPPORTED_MODELS[*]}"
 }
 
+configure_github_token() {
+    # GitHub token configuration for private repository access
+    if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+        log_info "GITHUB_TOKEN detected - configuring git for private repo access"
+        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+        log_info "Git configured for authenticated GitHub access"
+    fi
+}
+
 # -----------------------------------------------------------------------------
 # Main Initialization
 # -----------------------------------------------------------------------------
@@ -141,8 +151,12 @@ main() {
     configure_non_interactive
 
     # Step 4: Export agent metadata
-    log_info "Step 4/4: Exporting agent metadata..."
+    log_info "Step 4/5: Exporting agent metadata..."
     export_agent_metadata
+
+    # Step 5: Configure GitHub token (if available)
+    log_info "Step 5/5: Configuring GitHub access..."
+    configure_github_token
 
     # Verification
     log_info "=========================================="

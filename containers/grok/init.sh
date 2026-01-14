@@ -60,6 +60,14 @@ export GROK_STREAM="${GROK_STREAM:-true}"
 # Timeout configuration (seconds)
 export GROK_TIMEOUT="${GROK_TIMEOUT:-300}"
 
+# GitHub token configuration for private repository access
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    echo "GITHUB_TOKEN detected - configuring git for private repo access"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+    echo "Git configured for authenticated GitHub access"
+fi
+
 # -----------------------------------------------------------------------------
 # Agent Ready
 # -----------------------------------------------------------------------------

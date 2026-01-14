@@ -71,6 +71,14 @@ git config --global --add safe.directory '*'
 # Set default branch name for new repos
 git config --global init.defaultBranch main
 
+# GitHub token configuration for private repository access
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    echo "[INFO] GITHUB_TOKEN detected - configuring git for private repo access"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+    echo "[INFO] Git configured for authenticated GitHub access"
+fi
+
 echo "[INFO] Git configured: ${GIT_AUTHOR_NAME:-$AGENT_NAME} <${GIT_AUTHOR_EMAIL:-$AGENT_EMAIL}>"
 
 # -----------------------------------------------------------------------------

@@ -118,6 +118,14 @@ fi
 export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-Outpost Codex Agent}"
 export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-Outpost Codex Agent}"
 
+# GitHub token configuration for private repository access
+if [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    log_info "GITHUB_TOKEN detected - configuring git for private repo access"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+    git config --global url."https://${GITHUB_TOKEN}@github.com/".insteadOf "git@github.com:"
+    log_success "Git configured for authenticated GitHub access"
+fi
+
 # -----------------------------------------------------------------------------
 # Telemetry Configuration
 # -----------------------------------------------------------------------------
