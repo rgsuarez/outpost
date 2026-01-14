@@ -149,6 +149,21 @@ main() {
     log_info "  Workspace: ${WORKSPACE_DIR:-/workspace}"
     log_info "=========================================="
 
+    # -------------------------------------------------------------------------
+    # Task Execution (if TASK env var is set)
+    # -------------------------------------------------------------------------
+    # When running in ECS, the TASK environment variable contains the task
+    if [[ -n "${TASK:-}" ]]; then
+        log_info "TASK environment variable detected (${#TASK} chars)"
+        log_info "Executing task via Gemini CLI..."
+
+        # Change to workspace directory
+        cd "${WORKSPACE_DIR:-/workspace}"
+
+        # Execute Gemini with task in yolo mode (autonomous, no prompts)
+        exec gemini --yolo "${TASK}"
+    fi
+
     return 0
 }
 

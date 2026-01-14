@@ -133,3 +133,25 @@ else
     log_info "Yolo Mode: disabled"
 fi
 log_success "========================================"
+
+# -----------------------------------------------------------------------------
+# Task Execution (if TASK env var is set)
+# -----------------------------------------------------------------------------
+# When running in ECS, the TASK environment variable contains the task
+# If TASK is set, execute Codex with the task and exit
+if [ -n "${TASK:-}" ]; then
+    log_info "TASK environment variable detected (${#TASK} chars)"
+    log_info "Executing task via Codex CLI..."
+
+    # Change to workspace directory
+    cd "${CODEX_WORKSPACE}"
+
+    # Execute Codex with task in non-interactive mode
+    # Using exec subcommand with bypass flags for autonomous execution
+    exec codex exec \
+        --dangerously-bypass-approvals-and-sandbox \
+        --skip-git-repo-check \
+        "${TASK}"
+fi
+
+# If no TASK, continue to normal entrypoint (exec "$@")

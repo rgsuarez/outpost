@@ -274,15 +274,22 @@ def main() -> int:
         print("FATAL: XAI_API_KEY environment variable is not set", file=sys.stderr)
         return 1
 
-    # Get task from args or stdin
+    # Get task from environment (ECS injection), args, or stdin
+    # Priority: 1. TASK env var, 2. --task arg, 3. --stdin
     task: Optional[str] = None
 
-    if args.stdin:
-        task = sys.stdin.read().strip()
+    if os.environ.get('TASK'):
+        task = os.environ['TASK']
+        print(f"[grok-agent] Task received from TASK environment variable ({len(task)} chars)", file=sys.stderr)
     elif args.task:
         task = args.task
+        print("[grok-agent] Task received from --task argument", file=sys.stderr)
+    elif args.stdin:
+        task = sys.stdin.read().strip()
+        print("[grok-agent] Task received from stdin", file=sys.stderr)
     else:
-        print("ERROR: No task provided. Use --task or --stdin", file=sys.stderr)
+        print("ERROR: No task provided.", file=sys.stderr)
+        print("Options: Set TASK env var, use --task, or --stdin", file=sys.stderr)
         return 1
 
     if not task:
