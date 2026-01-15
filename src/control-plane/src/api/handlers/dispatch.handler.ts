@@ -36,6 +36,7 @@ export class DispatchHandler {
         agent: input.agent,
         task: input.task,
         workspaceMode: input.workspaceMode,
+        workspaceInitMode: input.workspaceInitMode,
         timeoutSeconds: input.timeoutSeconds,
         contextLevel: input.context,
       };

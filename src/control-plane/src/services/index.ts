@@ -23,8 +23,16 @@ export {
   SECRET_PATH_PREFIX,
   USER_SECRET_PATH_PREFIX,
   buildSecretArn,
+  // Tier 4 validation constants
+  SECRET_KEY_PATTERN,
+  MAX_SECRET_KEY_LENGTH,
+  MAX_SECRET_VALUE_LENGTH,
+  PROTECTED_SECRET_KEYS,
   type ContainerSecret,
   type SecretInjectionResult,
+  type GitCredentialConfig,
+  type AdditionalSecrets,
+  type SecretInjectionAuditLog,
 } from './secret-injector.js';
 export {
   TaskLauncherService,

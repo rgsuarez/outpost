@@ -18,9 +18,31 @@ export const AgentTypeSchema = z.enum(['claude', 'codex', 'gemini', 'aider', 'gr
 export const ContextLevelSchema = z.enum(['minimal', 'standard', 'full']);
 
 /**
- * Workspace mode
+ * Workspace mode (legacy - retained for backward compatibility)
  */
 export const WorkspaceModeSchema = z.enum(['ephemeral', 'persistent']);
+
+/**
+ * Workspace initialization mode for controlling repository cloning behavior
+ * - full: Full repository clone (default, existing behavior)
+ * - minimal: Sparse checkout (only *.md, *.json, *.yaml, *.yml, src/)
+ * - none: Empty workspace directory, skip git clone
+ */
+export const WorkspaceInitModeSchema = z
+  .enum(['full', 'minimal', 'none'])
+  .default('full')
+  .describe('Workspace initialization mode');
+
+/**
+ * Resource constraints for ECS task overrides (T5.3)
+ */
+export const ResourceConstraintsSchema = z.object({
+  maxMemoryMb: z.number().int().min(512).max(30720).optional(),
+  maxCpuUnits: z.number().int().min(256).max(4096).optional(),
+  maxDiskGb: z.number().int().min(21).max(200).optional(),
+});
+
+export type ResourceConstraints = z.infer<typeof ResourceConstraintsSchema>;
 
 /**
  * Schema for creating a new dispatch
@@ -39,8 +61,15 @@ export const CreateDispatchSchema = z.object({
   branch: z.string().max(255, 'Branch name too long').optional(),
   context: ContextLevelSchema.default('standard'),
   workspaceMode: WorkspaceModeSchema.default('ephemeral'),
+  workspaceInitMode: WorkspaceInitModeSchema.default('full'),
   timeoutSeconds: z.number().int().min(30).max(86400).default(600),
   additionalSecrets: z.array(z.string()).optional(),
+  // T5.1: Idempotency key for deduplication
+  idempotencyKey: z.string().max(128, 'Idempotency key too long').optional(),
+  // T5.2: Tags for categorization and filtering
+  tags: z.record(z.string(), z.string()).optional(),
+  // T5.3: Resource constraints for ECS task overrides
+  resourceConstraints: ResourceConstraintsSchema.optional(),
 });
 
 export type CreateDispatchInput = z.infer<typeof CreateDispatchSchema>;
@@ -104,6 +133,10 @@ export const DispatchResponseSchema = z.object({
   exitCode: z.number().optional(),
   errorMessage: z.string().optional(),
   estimatedStartTime: z.coerce.date().optional(),
+  // T5.1: Indicates if response was from idempotency cache
+  idempotent: z.boolean().optional(),
+  // T5.2: Tags associated with the dispatch
+  tags: z.record(z.string(), z.string()).optional(),
 });
 
 export type DispatchResponse = z.infer<typeof DispatchResponseSchema>;
@@ -116,3 +149,18 @@ export const CancelDispatchSchema = z.object({
 });
 
 export type CancelDispatchInput = z.infer<typeof CancelDispatchSchema>;
+
+/**
+ * Schema for listing dispatches with filtering (T5.4)
+ */
+export const ListDispatchesQuerySchema = z.object({
+  status: DispatchStatusSchema.optional(),
+  agent: AgentTypeSchema.optional(),
+  cursor: z.string().optional(),
+  limit: z.coerce.number().int().min(1).max(100).default(20),
+  since: z.coerce.date().optional(),
+  // T5.4: Tag filtering with AND logic (all tags must match)
+  tags: z.record(z.string(), z.string()).optional(),
+});
+
+export type ListDispatchesQuery = z.infer<typeof ListDispatchesQuerySchema>;

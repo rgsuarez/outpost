@@ -24,6 +24,15 @@ import { SecretInjectorService, getSecretInjectorService } from './secret-inject
 import type { AgentType } from '../types/agent.js';
 
 /**
+ * T5.3: Resource constraints for ECS task overrides
+ */
+export interface ResourceConstraints {
+  readonly maxMemoryMb?: number;
+  readonly maxCpuUnits?: number;
+  readonly maxDiskGb?: number;
+}
+
+/**
  * Request parameters for launching an ECS task
  */
 export interface TaskLaunchRequest {
@@ -34,8 +43,11 @@ export interface TaskLaunchRequest {
   readonly task: string;
   readonly repoUrl?: string;
   readonly workspaceMode: 'ephemeral' | 'persistent';
+  readonly workspaceInitMode: 'full' | 'minimal' | 'none';
   readonly timeoutSeconds: number;
   readonly additionalSecrets?: readonly string[];
+  // T5.3: Resource constraints for ECS task overrides
+  readonly resourceConstraints?: ResourceConstraints;
 }
 
 /**
@@ -214,13 +226,18 @@ export class TaskLauncherService {
     // Build environment variables
     const environment = this.buildEnvironmentVariables(request, taskSelection);
 
+    // T5.3: Apply resource constraints if provided, otherwise use task selection defaults
+    const constraints = request.resourceConstraints;
+    const effectiveCpu = constraints?.maxCpuUnits ?? taskSelection.cpu;
+    const effectiveMemory = constraints?.maxMemoryMb ?? taskSelection.memory;
+
     // Build container overrides (environment and resources only, secrets are in task definition)
     // Note: Container name matches the agent name in the task definition
     const containerOverride: ContainerOverride = {
       name: request.agent,
       environment,
-      cpu: taskSelection.cpu,
-      memory: taskSelection.memory,
+      cpu: effectiveCpu,
+      memory: effectiveMemory,
     };
 
     // Get network configuration
@@ -249,8 +266,14 @@ export class TaskLauncherService {
       },
       overrides: {
         containerOverrides: [containerOverride],
-        cpu: taskSelection.cpu.toString(),
-        memory: taskSelection.memory.toString(),
+        cpu: effectiveCpu.toString(),
+        memory: effectiveMemory.toString(),
+        // T5.3: Apply ephemeral storage constraint if provided
+        ...(constraints?.maxDiskGb !== undefined && {
+          ephemeralStorage: {
+            sizeInGiB: constraints.maxDiskGb,
+          },
+        }),
       },
       tags: [
         { key: 'dispatchId', value: request.dispatchId },
@@ -348,6 +371,7 @@ export class TaskLauncherService {
       { name: 'MODEL_ID', value: taskSelection.modelId },
       { name: 'TASK', value: request.task },
       { name: 'WORKSPACE_MODE', value: request.workspaceMode },
+      { name: 'WORKSPACE_INIT_MODE', value: request.workspaceInitMode },
       { name: 'TIMEOUT_SECONDS', value: request.timeoutSeconds.toString() },
       { name: 'OUTPUT_BUCKET', value: config.s3.outputBucket },
       { name: 'USER_ID', value: request.userId },

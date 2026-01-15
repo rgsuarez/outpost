@@ -24,7 +24,7 @@ import { getConfig } from '../utils/config.js';
 import { ValidationError, InternalError } from '../utils/errors.js';
 import { selectTaskDefinition, type TaskSelectionResult, type ModelTier } from './task-selector.js';
 import { SecretInjectorService, getSecretInjectorService } from './secret-injector.js';
-import { TaskLauncherService, getTaskLauncherService, type TaskLaunchRequest } from './task-launcher.js';
+import { TaskLauncherService, getTaskLauncherService, type TaskLaunchRequest, type ResourceConstraints as TaskLauncherResourceConstraints } from './task-launcher.js';
 import {
   DispatchRepository,
   type DispatchRecord,
@@ -37,6 +37,15 @@ import type { AgentType } from '../types/agent.js';
 const AGENT_TYPES = ['claude', 'codex', 'gemini', 'aider', 'grok'] as const;
 
 /**
+ * Resource constraints for ECS task overrides (T5.3)
+ */
+const ResourceConstraintsSchema = z.object({
+  maxMemoryMb: z.number().int().min(512).max(30720).optional(),
+  maxCpuUnits: z.number().int().min(256).max(4096).optional(),
+  maxDiskGb: z.number().int().min(21).max(200).optional(),
+});
+
+/**
  * Zod schema for dispatch request validation
  */
 const DispatchRequestSchema = z.object({
@@ -46,10 +55,26 @@ const DispatchRequestSchema = z.object({
   modelId: z.string().optional(),
   repoUrl: z.string().url('repoUrl must be a valid URL').optional(),
   workspaceMode: z.enum(['ephemeral', 'persistent']).default('ephemeral'),
+  workspaceInitMode: z.enum(['full', 'minimal', 'none']).default('full'),
   timeoutSeconds: z.number().int().min(30).max(86400).default(600),
   contextLevel: z.enum(['minimal', 'standard', 'full']).default('standard'),
   additionalSecrets: z.array(z.string()).optional(),
+  // T5.1: Idempotency key for deduplication
+  idempotencyKey: z.string().max(128).optional(),
+  // T5.2: Tags for categorization and filtering
+  tags: z.record(z.string(), z.string()).optional(),
+  // T5.3: Resource constraints for ECS task overrides
+  resourceConstraints: ResourceConstraintsSchema.optional(),
 });
+
+/**
+ * Resource constraints interface (T5.3)
+ */
+export interface ResourceConstraints {
+  readonly maxMemoryMb?: number;
+  readonly maxCpuUnits?: number;
+  readonly maxDiskGb?: number;
+}
 
 /**
  * Dispatch request interface
@@ -61,9 +86,16 @@ export interface DispatchRequest {
   readonly modelId?: string;
   readonly repoUrl?: string;
   readonly workspaceMode?: 'ephemeral' | 'persistent';
+  readonly workspaceInitMode?: 'full' | 'minimal' | 'none';
   readonly timeoutSeconds?: number;
   readonly contextLevel?: 'minimal' | 'standard' | 'full';
   readonly additionalSecrets?: string[];
+  // T5.1: Idempotency key for deduplication
+  readonly idempotencyKey?: string;
+  // T5.2: Tags for categorization and filtering
+  readonly tags?: Record<string, string>;
+  // T5.3: Resource constraints for ECS task overrides
+  readonly resourceConstraints?: ResourceConstraints;
 }
 
 /**
@@ -75,6 +107,10 @@ export interface DispatchResult {
   readonly agent: AgentType;
   readonly modelId: string;
   readonly estimatedStartTime: Date;
+  // T5.1: Indicates if response was from idempotency cache
+  readonly idempotent?: boolean;
+  // T5.2: Tags associated with the dispatch
+  readonly tags?: Record<string, string>;
 }
 
 /**
@@ -198,6 +234,7 @@ export class DispatcherOrchestrator {
    * Dispatch a task to an agent for execution
    *
    * Flow:
+   * 0. T5.1: Check idempotency key and return existing dispatch if found
    * 1. Generate ULID dispatch_id
    * 2. Validate request with Zod
    * 3. Select task definition and get resource config
@@ -215,6 +252,50 @@ export class DispatcherOrchestrator {
    * @throws ServiceUnavailableError if ECS capacity unavailable
    */
   async dispatch(request: DispatchRequest): Promise<DispatchResult> {
+    // T5.1: Step 0 - Check idempotency key before anything else
+    if (request.idempotencyKey !== undefined) {
+      const existingDispatch = await this.dispatchRepository.findByIdempotencyKey(
+        request.userId,
+        request.idempotencyKey
+      );
+
+      if (existingDispatch !== null) {
+        this.logger.info(
+          {
+            dispatchId: existingDispatch.dispatchId,
+            idempotencyKey: request.idempotencyKey,
+          },
+          'Returning existing dispatch for idempotency key'
+        );
+
+        // Map DB status to API status
+        const statusMap: Record<string, 'pending' | 'provisioning'> = {
+          PENDING: 'pending',
+          RUNNING: 'provisioning',
+          COMPLETED: 'provisioning',
+          FAILED: 'provisioning',
+          CANCELLED: 'provisioning',
+          TIMEOUT: 'provisioning',
+        };
+
+        const idempotentResult: DispatchResult = {
+          dispatchId: existingDispatch.dispatchId,
+          status: statusMap[existingDispatch.status] ?? 'provisioning',
+          agent: existingDispatch.agent,
+          modelId: existingDispatch.modelId,
+          estimatedStartTime: existingDispatch.startedAt,
+          idempotent: true,
+        };
+
+        // Only add tags if defined (exactOptionalPropertyTypes compliance)
+        if (existingDispatch.tags !== undefined && existingDispatch.tags !== null) {
+          (idempotentResult as { tags: Record<string, string> }).tags = existingDispatch.tags;
+        }
+
+        return idempotentResult;
+      }
+    }
+
     // Step 1: Generate ULID
     const dispatchId = generateUlid();
 
@@ -241,6 +322,7 @@ export class DispatcherOrchestrator {
 
     const validatedRequest = validationResult.data;
     const workspaceMode = validatedRequest.workspaceMode;
+    const workspaceInitMode = validatedRequest.workspaceInitMode;
     const timeoutSeconds = validatedRequest.timeoutSeconds;
 
     // Step 3: Select task definition and get resource configuration
@@ -300,6 +382,7 @@ export class DispatcherOrchestrator {
         agent: validatedRequest.agent,
         task: validatedRequest.task,
         workspaceMode,
+        workspaceInitMode,
         timeoutSeconds,
       };
 
@@ -312,6 +395,21 @@ export class DispatcherOrchestrator {
       }
       if (validatedRequest.additionalSecrets !== undefined) {
         (launchRequest as { additionalSecrets?: readonly string[] }).additionalSecrets = validatedRequest.additionalSecrets;
+      }
+      // T5.3: Add resource constraints if defined
+      if (validatedRequest.resourceConstraints !== undefined) {
+        const rc = validatedRequest.resourceConstraints;
+        const resourceConstraints: TaskLauncherResourceConstraints = {};
+        if (rc.maxMemoryMb !== undefined) {
+          (resourceConstraints as { maxMemoryMb: number }).maxMemoryMb = rc.maxMemoryMb;
+        }
+        if (rc.maxCpuUnits !== undefined) {
+          (resourceConstraints as { maxCpuUnits: number }).maxCpuUnits = rc.maxCpuUnits;
+        }
+        if (rc.maxDiskGb !== undefined) {
+          (resourceConstraints as { maxDiskGb: number }).maxDiskGb = rc.maxDiskGb;
+        }
+        (launchRequest as { resourceConstraints?: TaskLauncherResourceConstraints }).resourceConstraints = resourceConstraints;
       }
 
       const launchResult = await this.taskLauncher.launchTask(launchRequest);
@@ -374,6 +472,8 @@ export class DispatcherOrchestrator {
       agent: validatedRequest.agent,
       modelId: taskSelection.modelId,
       estimatedStartTime,
+      // T5.2: Include tags in result
+      ...(validatedRequest.tags !== undefined && { tags: validatedRequest.tags }),
     };
 
     this.logger.info(
@@ -391,19 +491,42 @@ export class DispatcherOrchestrator {
   /**
    * Create dispatch record in DynamoDB
    * Uses custom dispatchId instead of auto-generated one
+   * T5.1: Stores idempotency key mapping
+   * T5.2: Stores tags
    */
   private async createDispatchRecord(
     dispatchId: string,
     request: z.infer<typeof DispatchRequestSchema>,
     taskSelection: TaskSelectionResult
   ): Promise<DispatchRecord> {
-    const record = await this.dispatchRepository.create({
+    // Build create input with required fields
+    const createInput: {
+      dispatchId: string;
+      userId: string;
+      agent: typeof request.agent;
+      modelId: string;
+      task: string;
+      idempotencyKey?: string;
+      tags?: Record<string, string>;
+    } = {
       dispatchId,
       userId: request.userId,
       agent: request.agent,
       modelId: taskSelection.modelId,
       task: request.task,
-    });
+    };
+
+    // T5.1: Add idempotency key only if defined
+    if (request.idempotencyKey !== undefined) {
+      createInput.idempotencyKey = request.idempotencyKey;
+    }
+
+    // T5.2: Add tags only if defined
+    if (request.tags !== undefined) {
+      createInput.tags = request.tags;
+    }
+
+    const record = await this.dispatchRepository.create(createInput);
 
     this.logger.debug(
       { dispatchId: record.dispatchId },

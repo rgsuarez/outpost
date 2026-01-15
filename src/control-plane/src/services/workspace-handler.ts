@@ -27,12 +27,21 @@ import { getConfig } from '../utils/config.js';
 import { WorkspaceError, InternalError, ValidationError } from '../utils/errors.js';
 
 /**
+ * Workspace initialization mode
+ * - full: Full repository clone (default, existing behavior)
+ * - minimal: Sparse checkout (only *.md, *.json, *.yaml, *.yml, src/)
+ * - none: Empty workspace directory, skip git clone
+ */
+export type WorkspaceInitMode = 'full' | 'minimal' | 'none';
+
+/**
  * Configuration for workspace creation
  */
 export interface WorkspaceConfig {
   readonly dispatchId: string;
   readonly userId: string;
   readonly mode: 'ephemeral' | 'persistent';
+  readonly initMode?: WorkspaceInitMode;
   readonly repoUrl?: string;
   readonly branch?: string;
   readonly artifactsBucket: string;
@@ -182,6 +191,7 @@ export class EphemeralWorkspaceHandler {
   async createEphemeralWorkspace(config: WorkspaceConfig): Promise<WorkspaceResult> {
     const workspaceId = `${config.dispatchId}-${uuidv4().slice(0, 8)}`;
     const workspacePath = join(WORKSPACE_BASE_PATH, workspaceId);
+    const initMode = config.initMode ?? 'full';
 
     this.logger.info(
       {
@@ -189,6 +199,7 @@ export class EphemeralWorkspaceHandler {
         workspaceId,
         workspacePath,
         mode: config.mode,
+        initMode,
         hasRepo: config.repoUrl !== undefined,
       },
       'Creating ephemeral workspace'
@@ -198,10 +209,19 @@ export class EphemeralWorkspaceHandler {
       // Step 1: Create workspace directory
       await this.createWorkspaceDirectory(workspacePath);
 
-      // Step 2: Clone repository if specified
+      // Step 2: Handle repository cloning based on initMode
       let clonedRepo = false;
-      if (config.repoUrl !== undefined) {
-        clonedRepo = await this.cloneRepository(workspacePath, config.repoUrl, config.branch);
+      if (initMode === 'none') {
+        // 'none' mode: Skip git clone, just use empty workspace directory
+        this.logger.debug({ workspacePath, initMode }, 'Skipping repository clone (initMode=none)');
+      } else if (config.repoUrl !== undefined) {
+        if (initMode === 'minimal') {
+          // 'minimal' mode: Use sparse checkout
+          clonedRepo = await this.sparseCheckoutRepository(workspacePath, config.repoUrl, config.branch);
+        } else {
+          // 'full' mode (default): Full clone
+          clonedRepo = await this.cloneRepository(workspacePath, config.repoUrl, config.branch);
+        }
       }
 
       // Step 3: Configure git identity
@@ -213,6 +233,7 @@ export class EphemeralWorkspaceHandler {
           workspacePath,
           clonedRepo,
           gitConfigured,
+          initMode,
         },
         'Ephemeral workspace created successfully'
       );
@@ -337,6 +358,136 @@ export class EphemeralWorkspaceHandler {
       throw new WorkspaceError(
         basename(workspacePath),
         `Failed to clone repository: ${message}`,
+        { repoUrl, branch }
+      );
+    }
+  }
+
+  /**
+   * Sparse checkout a repository into the workspace (minimal mode)
+   *
+   * Only checks out specific file patterns to reduce download size:
+   * - *.md, *.json, *.yaml, *.yml (config/docs)
+   * - src/ directory (source code)
+   *
+   * Uses git sparse-checkout with --depth=1 for shallow clone.
+   *
+   * @param workspacePath - Path to workspace directory
+   * @param repoUrl - Git repository URL to clone
+   * @param branch - Optional branch to checkout
+   * @returns true if sparse checkout succeeded
+   * @throws WorkspaceError if sparse checkout fails
+   */
+  async sparseCheckoutRepository(workspacePath: string, repoUrl: string, branch?: string): Promise<boolean> {
+    this.logger.info(
+      {
+        workspacePath,
+        repoUrl,
+        branch: branch ?? 'default',
+      },
+      'Performing sparse checkout (minimal mode)'
+    );
+
+    // Validate URL format
+    if (!this.isValidGitUrl(repoUrl)) {
+      throw new ValidationError('Invalid git repository URL', { repoUrl });
+    }
+
+    try {
+      // Step 1: Initialize empty git repository
+      const initResult = await execCommand('git', ['init'], workspacePath, 30000);
+      if (initResult.exitCode !== 0) {
+        throw new Error(`Git init failed: ${initResult.stderr}`);
+      }
+
+      // Step 2: Configure sparse checkout
+      const sparseConfigResult = await execCommand(
+        'git',
+        ['config', 'core.sparseCheckout', 'true'],
+        workspacePath,
+        10000
+      );
+      if (sparseConfigResult.exitCode !== 0) {
+        throw new Error(`Failed to enable sparse checkout: ${sparseConfigResult.stderr}`);
+      }
+
+      // Step 3: Define sparse checkout patterns
+      const sparseCheckoutPatterns = [
+        '*.md',
+        '*.json',
+        '*.yaml',
+        '*.yml',
+        'src/',
+        'package.json',
+        'package-lock.json',
+        'tsconfig.json',
+        '.gitignore',
+        'README.md',
+        'LICENSE',
+      ];
+
+      // Write sparse-checkout file
+      const sparseCheckoutPath = join(workspacePath, '.git', 'info', 'sparse-checkout');
+      await fs.mkdir(join(workspacePath, '.git', 'info'), { recursive: true });
+      await fs.writeFile(sparseCheckoutPath, sparseCheckoutPatterns.join('\n') + '\n');
+
+      this.logger.debug(
+        { sparseCheckoutPath, patterns: sparseCheckoutPatterns },
+        'Sparse checkout patterns configured'
+      );
+
+      // Step 4: Add remote
+      const addRemoteResult = await execCommand(
+        'git',
+        ['remote', 'add', 'origin', repoUrl],
+        workspacePath,
+        10000
+      );
+      if (addRemoteResult.exitCode !== 0) {
+        throw new Error(`Failed to add remote: ${addRemoteResult.stderr}`);
+      }
+
+      // Step 5: Fetch with depth=1 (shallow)
+      const fetchArgs: string[] = ['fetch', '--depth', '1', 'origin'];
+      if (branch !== undefined && branch !== '') {
+        fetchArgs.push(branch);
+      } else {
+        fetchArgs.push('HEAD');
+      }
+
+      const fetchResult = await execCommand('git', fetchArgs, workspacePath, GIT_CLONE_TIMEOUT_MS);
+      if (fetchResult.exitCode !== 0) {
+        throw new Error(`Git fetch failed: ${fetchResult.stderr}`);
+      }
+
+      // Step 6: Checkout the fetched branch
+      const checkoutRef = branch !== undefined && branch !== '' ? `origin/${branch}` : 'FETCH_HEAD';
+      const checkoutResult = await execCommand(
+        'git',
+        ['checkout', checkoutRef],
+        workspacePath,
+        60000
+      );
+      if (checkoutResult.exitCode !== 0) {
+        throw new Error(`Git checkout failed: ${checkoutResult.stderr}`);
+      }
+
+      this.logger.info(
+        {
+          workspacePath,
+          repoUrl,
+          branch: branch ?? 'default',
+          patterns: sparseCheckoutPatterns.length,
+        },
+        'Sparse checkout completed successfully'
+      );
+
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      throw new WorkspaceError(
+        basename(workspacePath),
+        `Failed to perform sparse checkout: ${message}`,
         { repoUrl, branch }
       );
     }

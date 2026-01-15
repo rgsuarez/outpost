@@ -2,6 +2,14 @@
  * Workspace type definitions for EFS-based job workspaces
  */
 
+/**
+ * Workspace initialization mode for controlling repository cloning behavior
+ * - full: Full repository clone (default, existing behavior)
+ * - minimal: Sparse checkout (only *.md, *.json, *.yaml, *.yml, src/)
+ * - none: Empty workspace directory, skip git clone
+ */
+export type WorkspaceInitMode = 'full' | 'minimal' | 'none';
+
 export interface Workspace {
   readonly workspaceId: string;
   readonly jobId: string;

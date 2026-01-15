@@ -480,6 +480,7 @@ export class WarmPoolManager {
       agent: agentType,
       task: 'pool-warm', // Worker recognizes this as idle/standby mode
       workspaceMode: 'ephemeral',
+      workspaceInitMode: 'none', // Pool warm tasks don't need workspace
       timeoutSeconds: 3600,
     };
 

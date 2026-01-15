@@ -46,6 +46,10 @@ export interface DispatchRecord {
   readonly artifactsUrl: string | null;
   readonly errorMessage: string | null;
   readonly version: number;
+  // T5.1: Idempotency key for deduplication
+  readonly idempotencyKey: string | null;
+  // T5.2: Tags for categorization and filtering
+  readonly tags: Record<string, string> | null;
 }
 
 /**
@@ -57,6 +61,10 @@ export interface CreateDispatchInput {
   readonly agent: AgentType;
   readonly modelId: string;
   readonly task: string;
+  // T5.1: Idempotency key for deduplication
+  readonly idempotencyKey?: string;
+  // T5.2: Tags for categorization and filtering
+  readonly tags?: Record<string, string>;
 }
 
 /**
@@ -66,6 +74,8 @@ export interface ListDispatchesQuery {
   readonly limit?: number;
   readonly cursor?: string;
   readonly status?: DispatchStatus;
+  // T5.4: Tag filtering with AND logic (all tags must match)
+  readonly tags?: Record<string, string>;
 }
 
 /**
@@ -85,6 +95,10 @@ interface DispatchDynamoItem {
   artifacts_url?: string;
   error_message?: string;
   version: number;
+  // T5.1: Idempotency key for deduplication
+  idempotency_key?: string;
+  // T5.2: Tags for categorization and filtering
+  tags?: Record<string, string>;
 }
 
 function toDynamoItem(record: DispatchRecord): DispatchDynamoItem {
@@ -114,6 +128,14 @@ function toDynamoItem(record: DispatchRecord): DispatchDynamoItem {
   if (record.errorMessage !== null) {
     item.error_message = record.errorMessage;
   }
+  // T5.1: Idempotency key
+  if (record.idempotencyKey !== null) {
+    item.idempotency_key = record.idempotencyKey;
+  }
+  // T5.2: Tags
+  if (record.tags !== null && Object.keys(record.tags).length > 0) {
+    item.tags = record.tags;
+  }
 
   return item;
 }
@@ -133,17 +155,54 @@ function fromDynamoItem(item: Record<string, unknown>): DispatchRecord {
     artifactsUrl: (item['artifacts_url'] as string) ?? null,
     errorMessage: (item['error_message'] as string) ?? null,
     version: item['version'] as number,
+    // T5.1: Idempotency key
+    idempotencyKey: (item['idempotency_key'] as string) ?? null,
+    // T5.2: Tags
+    tags: (item['tags'] as Record<string, string>) ?? null,
   };
 }
 
 export class DispatchRepository {
   private readonly tableName: string;
+  private readonly idempotencyTableName: string;
   private readonly gsiName = 'user_id-started_at-index';
   private readonly logger = getLogger().child({ repository: 'DispatchRepository' });
 
   constructor() {
     const prefix = process.env['DYNAMODB_TABLE_PREFIX'] ?? 'outpost';
     this.tableName = `${prefix}-dispatches`;
+    this.idempotencyTableName = `${prefix}-dispatch-idempotency`;
+  }
+
+  /**
+   * T5.1: Find dispatch by idempotency key
+   * Returns the dispatch if found, null otherwise
+   */
+  async findByIdempotencyKey(userId: string, idempotencyKey: string): Promise<DispatchRecord | null> {
+    const docClient = getDocClient();
+    const compositeKey = `${userId}#${idempotencyKey}`;
+
+    this.logger.debug({ userId, idempotencyKey }, 'Looking up dispatch by idempotency key');
+
+    try {
+      const result = await docClient.send(
+        new GetCommand({
+          TableName: this.idempotencyTableName,
+          Key: { idempotency_key: compositeKey },
+        })
+      );
+
+      if (result.Item === undefined) {
+        return null;
+      }
+
+      const dispatchId = result.Item['dispatch_id'] as string;
+      return this.getById(dispatchId);
+    } catch (error) {
+      // If table doesn't exist, return null (graceful degradation)
+      this.logger.warn({ error }, 'Idempotency lookup failed, continuing without idempotency');
+      return null;
+    }
   }
 
   /**
@@ -167,6 +226,10 @@ export class DispatchRepository {
       artifactsUrl: null,
       errorMessage: null,
       version: 1,
+      // T5.1: Idempotency key
+      idempotencyKey: input.idempotencyKey ?? null,
+      // T5.2: Tags
+      tags: input.tags ?? null,
     };
 
     this.logger.debug({ dispatchId: record.dispatchId, userId: input.userId }, 'Creating dispatch');
@@ -178,6 +241,31 @@ export class DispatchRepository {
         ConditionExpression: 'attribute_not_exists(dispatch_id)',
       })
     );
+
+    // T5.1: Store idempotency key mapping if provided
+    if (input.idempotencyKey !== undefined) {
+      const compositeKey = `${input.userId}#${input.idempotencyKey}`;
+      const ttlSeconds = 24 * 60 * 60; // 24 hour TTL for idempotency keys
+      const ttl = Math.floor(Date.now() / 1000) + ttlSeconds;
+
+      try {
+        await docClient.send(
+          new PutCommand({
+            TableName: this.idempotencyTableName,
+            Item: {
+              idempotency_key: compositeKey,
+              dispatch_id: record.dispatchId,
+              created_at: now.toISOString(),
+              ttl,
+            },
+          })
+        );
+        this.logger.debug({ dispatchId: record.dispatchId, idempotencyKey: input.idempotencyKey }, 'Stored idempotency key mapping');
+      } catch (error) {
+        // Non-fatal: idempotency table might not exist yet
+        this.logger.warn({ error, idempotencyKey: input.idempotencyKey }, 'Failed to store idempotency key mapping');
+      }
+    }
 
     return record;
   }
@@ -274,6 +362,7 @@ export class DispatchRepository {
 
   /**
    * List dispatches by user ID, ordered by started_at descending
+   * T5.4: Supports tag filtering with AND logic
    */
   async listByUser(
     userId: string,
@@ -297,13 +386,39 @@ export class DispatchRepository {
       params.ExclusiveStartKey = JSON.parse(Buffer.from(query.cursor, 'base64').toString('utf-8'));
     }
 
+    // Build filter expressions
+    const filterExpressions: string[] = [];
+    const expressionAttributeNames: Record<string, string> = {};
+
     if (query.status !== undefined) {
-      params.FilterExpression = '#status = :statusFilter';
-      params.ExpressionAttributeNames = { '#status': 'status' };
+      filterExpressions.push('#status = :statusFilter');
+      expressionAttributeNames['#status'] = 'status';
       params.ExpressionAttributeValues = {
         ...params.ExpressionAttributeValues,
         ':statusFilter': query.status,
       };
+    }
+
+    // T5.4: Tag filtering with AND logic - all specified tags must match
+    if (query.tags !== undefined && Object.keys(query.tags).length > 0) {
+      let tagIndex = 0;
+      for (const [tagKey, tagValue] of Object.entries(query.tags)) {
+        const keyPlaceholder = `#tagKey${tagIndex}`;
+        const valuePlaceholder = `:tagValue${tagIndex}`;
+        filterExpressions.push(`tags.${keyPlaceholder} = ${valuePlaceholder}`);
+        expressionAttributeNames[keyPlaceholder] = tagKey;
+        params.ExpressionAttributeValues = {
+          ...params.ExpressionAttributeValues,
+          [valuePlaceholder]: tagValue,
+        };
+        tagIndex++;
+      }
+    }
+
+    // Apply filter expressions if any
+    if (filterExpressions.length > 0) {
+      params.FilterExpression = filterExpressions.join(' AND ');
+      params.ExpressionAttributeNames = expressionAttributeNames;
     }
 
     const result = await docClient.send(new QueryCommand(params));
