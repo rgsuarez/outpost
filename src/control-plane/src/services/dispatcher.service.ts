@@ -86,7 +86,7 @@ export class DispatcherService {
       });
     }
 
-    const updatedJob = await this.jobRepository.updateStatus(jobId, 'CANCELLED', {
+    const updatedJob = await this.jobRepository.updateStatus(jobId, tenantId, 'CANCELLED', {
       completedAt: new Date(),
     });
 

@@ -461,4 +461,111 @@ describe('DispatchRepository', () => {
       expect(result.errorMessage).toBe('Task execution failed');
     });
   });
+
+  describe('TTL calculation (T0.3, T0.4)', () => {
+    it('should set expires_at attribute when creating dispatch', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const input: CreateDispatchInput = {
+        userId: 'user-123',
+        agent: 'claude',
+        modelId: 'claude-opus-4-5-20251101',
+        task: 'Test task',
+      };
+
+      await repository.create(input);
+
+      // Verify the PutCommand was called with expires_at
+      expect(mockSend).toHaveBeenCalledTimes(1);
+      const putCommand = mockSend.mock.calls[0][0];
+      expect(putCommand.input.Item).toHaveProperty('expires_at');
+      expect(typeof putCommand.input.Item.expires_at).toBe('number');
+    });
+
+    it('should calculate expires_at timestamp 90 days from now', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const beforeCreate = Date.now();
+
+      const input: CreateDispatchInput = {
+        userId: 'user-123',
+        agent: 'claude',
+        modelId: 'claude-opus-4-5-20251101',
+        task: 'Test task',
+      };
+
+      await repository.create(input);
+
+      const afterCreate = Date.now();
+
+      // Extract expires_at from the mocked call
+      const putCommand = mockSend.mock.calls[0][0];
+      const expiresAtUnix = putCommand.input.Item.expires_at;
+
+      // Convert Unix timestamp back to milliseconds
+      const expiresAtMs = expiresAtUnix * 1000;
+
+      // Expected expiration is 90 days from now
+      const ninetyDaysMs = 90 * 24 * 60 * 60 * 1000;
+      const expectedExpiresAtMin = beforeCreate + ninetyDaysMs;
+      const expectedExpiresAtMax = afterCreate + ninetyDaysMs;
+
+      // Allow 2 second tolerance for test execution time
+      expect(expiresAtMs).toBeGreaterThanOrEqual(expectedExpiresAtMin - 2000);
+      expect(expiresAtMs).toBeLessThanOrEqual(expectedExpiresAtMax + 2000);
+    });
+
+    it('should calculate expires_at as valid Unix timestamp', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const input: CreateDispatchInput = {
+        userId: 'user-123',
+        agent: 'claude',
+        modelId: 'claude-opus-4-5-20251101',
+        task: 'Test task',
+      };
+
+      await repository.create(input);
+
+      // Extract expires_at from the mocked call
+      const putCommand = mockSend.mock.calls[0][0];
+      const expiresAtUnix = putCommand.input.Item.expires_at;
+
+      // Verify it's a valid Unix timestamp (integer, positive, reasonable)
+      expect(Number.isInteger(expiresAtUnix)).toBe(true);
+      expect(expiresAtUnix).toBeGreaterThan(0);
+
+      // Should be a future timestamp (after current time)
+      const nowUnix = Math.floor(Date.now() / 1000);
+      expect(expiresAtUnix).toBeGreaterThan(nowUnix);
+
+      // Should be convertible to a valid date
+      const expiresAtDate = new Date(expiresAtUnix * 1000);
+      expect(expiresAtDate.toString()).not.toBe('Invalid Date');
+    });
+
+    it('should set expires_at in ISO 8601 compatible format', async () => {
+      mockSend.mockResolvedValueOnce({});
+
+      const input: CreateDispatchInput = {
+        userId: 'user-123',
+        agent: 'claude',
+        modelId: 'claude-opus-4-5-20251101',
+        task: 'Test task',
+      };
+
+      await repository.create(input);
+
+      // Extract expires_at from the mocked call
+      const putCommand = mockSend.mock.calls[0][0];
+      const expiresAtUnix = putCommand.input.Item.expires_at;
+
+      // Convert to ISO 8601 and verify format
+      const expiresAtDate = new Date(expiresAtUnix * 1000);
+      const isoString = expiresAtDate.toISOString();
+
+      // Valid ISO 8601 format: YYYY-MM-DDTHH:mm:ss.sssZ
+      expect(isoString).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    });
+  });
 });

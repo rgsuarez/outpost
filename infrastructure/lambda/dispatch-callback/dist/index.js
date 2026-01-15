@@ -13,6 +13,7 @@
  */
 import { mapEcsTaskToDispatchStatus, extractDispatchId, shouldProcessTask } from './status-mapper.js';
 import { updateDispatchStatus, findDispatchByTaskArn } from './dynamodb.js';
+import { publishCallbackLatency } from './cloudwatch.js';
 /**
  * Main Lambda handler for ECS Task State Change events.
  *
@@ -103,6 +104,10 @@ export async function handler(event) {
         };
     }
     console.log(`Successfully updated dispatch ${dispatchId} to status ${statusMapping.status}`);
+    // Publish callback latency metric to CloudWatch
+    if (task.stoppedAt) {
+        await publishCallbackLatency(task.stoppedAt);
+    }
     return {
         statusCode: 200,
         body: {

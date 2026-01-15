@@ -34,3 +34,23 @@ resource "aws_iam_role_policy_attachment" "lambda_logs" {
   role       = aws_iam_role.dispatch_callback_lambda.name
   policy_arn = "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 }
+
+# CloudWatch Metrics policy for callback latency tracking
+resource "aws_iam_role_policy" "cloudwatch_metrics" {
+  name = "cloudwatch-metrics-access"
+  role = aws_iam_role.dispatch_callback_lambda.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["cloudwatch:PutMetricData"]
+      Resource = "*"
+      Condition = {
+        StringEquals = {
+          "cloudwatch:namespace" = "Outpost/DispatchCallback"
+        }
+      }
+    }]
+  })
+}

@@ -70,6 +70,8 @@ export const CreateDispatchSchema = z.object({
   tags: z.record(z.string(), z.string()).optional(),
   // T5.3: Resource constraints for ECS task overrides
   resourceConstraints: ResourceConstraintsSchema.optional(),
+  // T0.2: Optional expiration timestamp for dispatch lifecycle management
+  expires_at: z.string().datetime().optional(),
 });
 
 export type CreateDispatchInput = z.infer<typeof CreateDispatchSchema>;

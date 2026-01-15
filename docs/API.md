@@ -355,6 +355,109 @@ curl -X DELETE https://api.outpost.dev/dispatch/dsp_20260113_143052_abc123 \
 
 ---
 
+### Job Operations
+
+#### GET /api/v2/jobs
+
+List jobs with optional filtering and pagination. Returns jobs sorted by creation date (newest first).
+
+**Authentication**: Required (scope: `list`)
+
+**Query Parameters**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| `status` | string | No | - | Filter by status: `PENDING`, `QUEUED`, `RUNNING`, `COMPLETED`, `FAILED`, `CANCELLED`, `TIMEOUT` |
+| `agent` | string | No | - | Filter by agent: `claude`, `codex`, `gemini`, `aider`, `grok` |
+| `repo` | string | No | - | Filter by repository (owner/repo format) |
+| `since` | string (ISO 8601) | No | - | Filter jobs created after this timestamp |
+| `limit` | integer | No | 20 | Number of results to return (1-100) |
+| `cursor` | string | No | - | Pagination cursor from previous response |
+
+**Response (200 OK)**
+
+```json
+{
+  "success": true,
+  "data": {
+    "items": [
+      {
+        "jobId": "550e8400-e29b-41d4-a716-446655440000",
+        "tenantId": "660e8400-e29b-41d4-a716-446655440001",
+        "agent": "claude",
+        "task": "Implement unit tests for the authentication module",
+        "repo": "myorg/myrepo",
+        "branch": "feature/auth",
+        "context": "standard",
+        "status": "COMPLETED",
+        "workerId": "worker-abc123",
+        "workspacePath": "/workspaces/550e8400",
+        "createdAt": "2026-01-13T14:30:00.000Z",
+        "startedAt": "2026-01-13T14:30:05.000Z",
+        "completedAt": "2026-01-13T14:35:00.000Z",
+        "timeoutSeconds": 600,
+        "exitCode": 0,
+        "errorMessage": null,
+        "outputS3Key": "outputs/550e8400/result.json"
+      }
+    ],
+    "nextCursor": "eyJsYXN0S2V5IjoiNTUwZTg0MDAifQ==",
+    "hasMore": true
+  },
+  "meta": {
+    "requestId": "req_abc123",
+    "timestamp": "2026-01-13T14:36:00.000Z",
+    "pagination": {
+      "cursor": "eyJsYXN0S2V5IjoiNTUwZTg0MDAifQ==",
+      "hasMore": true,
+      "limit": 20
+    }
+  }
+}
+```
+
+**Job Status Values**
+
+| Status | Description |
+|--------|-------------|
+| `PENDING` | Job created, awaiting queue placement |
+| `QUEUED` | Job queued, waiting for worker allocation |
+| `RUNNING` | Worker actively executing the job |
+| `COMPLETED` | Job finished successfully |
+| `FAILED` | Job failed with error |
+| `CANCELLED` | Job cancelled by user |
+| `TIMEOUT` | Job exceeded timeout limit |
+
+**Examples**
+
+```bash
+# List all jobs (default pagination)
+curl "https://api.outpost.dev/api/v2/jobs" \
+  -H "Authorization: Bearer otp_xxxxxxxxxxxx"
+
+# Filter by status
+curl "https://api.outpost.dev/api/v2/jobs?status=COMPLETED" \
+  -H "Authorization: Bearer otp_xxxxxxxxxxxx"
+
+# Filter by agent
+curl "https://api.outpost.dev/api/v2/jobs?agent=claude" \
+  -H "Authorization: Bearer otp_xxxxxxxxxxxx"
+
+# Combined filtering with pagination
+curl "https://api.outpost.dev/api/v2/jobs?status=COMPLETED&agent=claude&limit=10" \
+  -H "Authorization: Bearer otp_xxxxxxxxxxxx"
+
+# Filter by date range
+curl "https://api.outpost.dev/api/v2/jobs?since=2026-01-13T00:00:00.000Z" \
+  -H "Authorization: Bearer otp_xxxxxxxxxxxx"
+
+# Paginate through results
+curl "https://api.outpost.dev/api/v2/jobs?cursor=eyJsYXN0S2V5IjoiNTUwZTg0MDAifQ==" \
+  -H "Authorization: Bearer otp_xxxxxxxxxxxx"
+```
+
+---
+
 ### Workspace Operations
 
 #### GET /workspaces

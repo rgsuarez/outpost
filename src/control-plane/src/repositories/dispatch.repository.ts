@@ -50,6 +50,8 @@ export interface DispatchRecord {
   readonly idempotencyKey: string | null;
   // T5.2: Tags for categorization and filtering
   readonly tags: Record<string, string> | null;
+  // T0.2: Optional expiration timestamp for dispatch lifecycle management
+  readonly expiresAt?: string;
 }
 
 /**
@@ -99,6 +101,8 @@ interface DispatchDynamoItem {
   idempotency_key?: string;
   // T5.2: Tags for categorization and filtering
   tags?: Record<string, string>;
+  // T0.2: TTL attribute for automatic expiration
+  expires_at?: number;
 }
 
 function toDynamoItem(record: DispatchRecord): DispatchDynamoItem {
@@ -136,12 +140,16 @@ function toDynamoItem(record: DispatchRecord): DispatchDynamoItem {
   if (record.tags !== null && Object.keys(record.tags).length > 0) {
     item.tags = record.tags;
   }
+  // T0.2: Expiration timestamp (convert ISO string to Unix epoch seconds for DynamoDB TTL)
+  if (record.expiresAt !== undefined) {
+    item.expires_at = Math.floor(new Date(record.expiresAt).getTime() / 1000);
+  }
 
   return item;
 }
 
 function fromDynamoItem(item: Record<string, unknown>): DispatchRecord {
-  return {
+  const record: DispatchRecord = {
     dispatchId: item['dispatch_id'] as string,
     userId: item['user_id'] as string,
     agent: item['agent'] as AgentType,
@@ -160,6 +168,16 @@ function fromDynamoItem(item: Record<string, unknown>): DispatchRecord {
     // T5.2: Tags
     tags: (item['tags'] as Record<string, string>) ?? null,
   };
+
+  // T0.2: Expiration timestamp (convert Unix epoch seconds to ISO string)
+  if (item['expires_at'] !== undefined) {
+    return {
+      ...record,
+      expiresAt: new Date((item['expires_at'] as number) * 1000).toISOString()
+    };
+  }
+
+  return record;
 }
 
 export class DispatchRepository {
@@ -172,6 +190,15 @@ export class DispatchRepository {
     const prefix = process.env['DYNAMODB_TABLE_PREFIX'] ?? 'outpost';
     this.tableName = `${prefix}-dispatches`;
     this.idempotencyTableName = `${prefix}-dispatch-idempotency`;
+  }
+
+  /**
+   * T0.3: Calculate expires_at timestamp (90 days from now)
+   */
+  private calculateExpiresAt(): string {
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + (90 * 24 * 60 * 60 * 1000));
+    return expiresAt.toISOString();
   }
 
   /**
@@ -234,10 +261,19 @@ export class DispatchRepository {
 
     this.logger.debug({ dispatchId: record.dispatchId, userId: input.userId }, 'Creating dispatch');
 
+    // T0.3: Calculate expires_at (90 days from now, Unix timestamp)
+    const expiresAtIso = this.calculateExpiresAt();
+    const expiresAtUnix = Math.floor(new Date(expiresAtIso).getTime() / 1000);
+
+    const item: DispatchDynamoItem = {
+      ...toDynamoItem(record),
+      expires_at: expiresAtUnix,
+    };
+
     await docClient.send(
       new PutCommand({
         TableName: this.tableName,
-        Item: toDynamoItem(record),
+        Item: item,
         ConditionExpression: 'attribute_not_exists(dispatch_id)',
       })
     );

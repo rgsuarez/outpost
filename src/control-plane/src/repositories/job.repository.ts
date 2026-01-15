@@ -61,20 +61,20 @@ export class JobRepository {
       new PutCommand({
         TableName: this.tableName,
         Item: toDynamoItem(job),
-        ConditionExpression: 'attribute_not_exists(jobId)',
+        ConditionExpression: 'attribute_not_exists(job_id)',
       })
     );
 
     return job;
   }
 
-  async getById(jobId: string): Promise<JobModel> {
+  async getById(jobId: string, tenantId: string): Promise<JobModel> {
     const docClient = getDocClient();
 
     const result = await docClient.send(
       new GetCommand({
         TableName: this.tableName,
-        Key: { jobId },
+        Key: { tenant_id: tenantId, job_id: jobId },
       })
     );
 
@@ -86,17 +86,13 @@ export class JobRepository {
   }
 
   async getByIdForTenant(jobId: string, tenantId: string): Promise<JobModel> {
-    const job = await this.getById(jobId);
-
-    if (job.tenantId !== tenantId) {
-      throw new NotFoundError(`Job not found: ${jobId}`);
-    }
-
-    return job;
+    // With composite key, we already scope by tenant
+    return this.getById(jobId, tenantId);
   }
 
   async updateStatus(
     jobId: string,
+    tenantId: string,
     status: JobStatus,
     updates?: Partial<Pick<JobModel, 'workerId' | 'startedAt' | 'completedAt' | 'exitCode' | 'errorMessage' | 'outputS3Key' | 'workspacePath'>>
   ): Promise<JobModel> {
@@ -108,31 +104,31 @@ export class JobRepository {
 
     if (updates !== undefined) {
       if (updates.workerId !== undefined) {
-        updateExpressions.push('workerId = :workerId');
+        updateExpressions.push('worker_id = :workerId');
         expressionAttributeValues[':workerId'] = updates.workerId;
       }
       if (updates.startedAt !== undefined && updates.startedAt !== null) {
-        updateExpressions.push('startedAt = :startedAt');
+        updateExpressions.push('started_at = :startedAt');
         expressionAttributeValues[':startedAt'] = updates.startedAt.toISOString();
       }
       if (updates.completedAt !== undefined && updates.completedAt !== null) {
-        updateExpressions.push('completedAt = :completedAt');
+        updateExpressions.push('completed_at = :completedAt');
         expressionAttributeValues[':completedAt'] = updates.completedAt.toISOString();
       }
       if (updates.exitCode !== undefined) {
-        updateExpressions.push('exitCode = :exitCode');
+        updateExpressions.push('exit_code = :exitCode');
         expressionAttributeValues[':exitCode'] = updates.exitCode;
       }
       if (updates.errorMessage !== undefined) {
-        updateExpressions.push('errorMessage = :errorMessage');
+        updateExpressions.push('error_message = :errorMessage');
         expressionAttributeValues[':errorMessage'] = updates.errorMessage;
       }
       if (updates.outputS3Key !== undefined) {
-        updateExpressions.push('outputS3Key = :outputS3Key');
+        updateExpressions.push('output_s3_key = :outputS3Key');
         expressionAttributeValues[':outputS3Key'] = updates.outputS3Key;
       }
       if (updates.workspacePath !== undefined) {
-        updateExpressions.push('workspacePath = :workspacePath');
+        updateExpressions.push('workspace_path = :workspacePath');
         expressionAttributeValues[':workspacePath'] = updates.workspacePath;
       }
     }
@@ -140,7 +136,7 @@ export class JobRepository {
     const result = await docClient.send(
       new UpdateCommand({
         TableName: this.tableName,
-        Key: { jobId },
+        Key: { tenant_id: tenantId, job_id: jobId },
         UpdateExpression: `SET ${updateExpressions.join(', ')}`,
         ExpressionAttributeNames: expressionAttributeNames,
         ExpressionAttributeValues: expressionAttributeValues,
@@ -161,15 +157,17 @@ export class JobRepository {
   ): Promise<{ items: JobModel[]; nextCursor?: string | undefined }> {
     const docClient = getDocClient();
 
+    // Query on main table using tenant_id as partition key
+    // Note: Results sorted by job_id (range key), not created_at
+    // We sort by createdAt in memory after retrieval
     const params: QueryCommandInput = {
       TableName: this.tableName,
-      IndexName: 'tenant-created-index',
-      KeyConditionExpression: 'tenantId = :tenantId',
+      KeyConditionExpression: 'tenant_id = :tenantId',
       ExpressionAttributeValues: {
         ':tenantId': tenantId,
       },
-      Limit: query.limit,
-      ScanIndexForward: false, // Descending order by createdAt
+      // Fetch extra items for in-memory sorting, then limit
+      Limit: Math.min((query.limit ?? 20) * 3, 300),
     };
 
     if (query.cursor !== undefined) {
@@ -189,7 +187,8 @@ export class JobRepository {
     }
 
     if (query.agent !== undefined) {
-      filterExpressions.push('agent = :agentFilter');
+      filterExpressions.push('#agent = :agentFilter');
+      expressionAttributeNames['#agent'] = 'agent';
       params.ExpressionAttributeValues = {
         ...params.ExpressionAttributeValues,
         ':agentFilter': query.agent,
@@ -198,15 +197,25 @@ export class JobRepository {
 
     if (filterExpressions.length > 0) {
       params.FilterExpression = filterExpressions.join(' AND ');
-      params.ExpressionAttributeNames = expressionAttributeNames;
+      // Only set ExpressionAttributeNames if it has entries
+      if (Object.keys(expressionAttributeNames).length > 0) {
+        params.ExpressionAttributeNames = expressionAttributeNames;
+      }
     }
 
     const result = await docClient.send(new QueryCommand(params));
 
-    const items = (result.Items ?? []).map((item) => fromDynamoItem(item));
-    let nextCursor: string | undefined;
+    // Convert items and sort by createdAt descending (newest first)
+    let items = (result.Items ?? []).map((item) => fromDynamoItem(item));
+    items.sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
 
-    if (result.LastEvaluatedKey !== undefined) {
+    // Apply limit after sorting
+    const requestedLimit = query.limit ?? 20;
+    const hasMore = items.length > requestedLimit || result.LastEvaluatedKey !== undefined;
+    items = items.slice(0, requestedLimit);
+
+    let nextCursor: string | undefined;
+    if (hasMore && result.LastEvaluatedKey !== undefined) {
       nextCursor = Buffer.from(JSON.stringify(result.LastEvaluatedKey)).toString('base64');
     }
 
@@ -219,12 +228,12 @@ export class JobRepository {
     const result = await docClient.send(
       new QueryCommand({
         TableName: this.tableName,
-        IndexName: 'status-created-index',
+        IndexName: 'status-index',
         KeyConditionExpression: '#status = :status',
         ExpressionAttributeNames: { '#status': 'status' },
         ExpressionAttributeValues: { ':status': 'PENDING' },
         Limit: limit,
-        ScanIndexForward: true, // Oldest first
+        ScanIndexForward: true, // Oldest first (by created_at)
       })
     );
 

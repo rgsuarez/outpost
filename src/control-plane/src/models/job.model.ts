@@ -69,50 +69,52 @@ export type ListJobsQuery = z.infer<typeof ListJobsQuerySchema>;
 
 /**
  * Convert DynamoDB item to Job model
+ * Note: DynamoDB uses snake_case attribute names, model uses camelCase
  */
 export function fromDynamoItem(item: Record<string, unknown>): JobModel {
   return JobSchema.parse({
-    jobId: item['jobId'],
-    tenantId: item['tenantId'],
+    jobId: item['job_id'],
+    tenantId: item['tenant_id'],
     agent: item['agent'],
     task: item['task'],
     repo: item['repo'] ?? null,
     branch: item['branch'] ?? null,
     context: item['context'],
     status: item['status'],
-    workerId: item['workerId'] ?? null,
-    workspacePath: item['workspacePath'] ?? null,
-    createdAt: item['createdAt'],
-    startedAt: item['startedAt'] ?? null,
-    completedAt: item['completedAt'] ?? null,
-    timeoutSeconds: item['timeoutSeconds'],
-    exitCode: item['exitCode'] ?? null,
-    errorMessage: item['errorMessage'] ?? null,
-    outputS3Key: item['outputS3Key'] ?? null,
+    workerId: item['worker_id'] ?? null,
+    workspacePath: item['workspace_path'] ?? null,
+    createdAt: item['created_at'],
+    startedAt: item['started_at'] ?? null,
+    completedAt: item['completed_at'] ?? null,
+    timeoutSeconds: item['timeout_seconds'],
+    exitCode: item['exit_code'] ?? null,
+    errorMessage: item['error_message'] ?? null,
+    outputS3Key: item['output_s3_key'] ?? null,
   });
 }
 
 /**
  * Convert Job model to DynamoDB item
+ * Note: DynamoDB uses snake_case attribute names, model uses camelCase
  */
 export function toDynamoItem(job: JobModel): Record<string, unknown> {
   return {
-    jobId: job.jobId,
-    tenantId: job.tenantId,
+    job_id: job.jobId,
+    tenant_id: job.tenantId,
     agent: job.agent,
     task: job.task,
     ...(job.repo !== null ? { repo: job.repo } : {}),
     ...(job.branch !== null ? { branch: job.branch } : {}),
     context: job.context,
     status: job.status,
-    ...(job.workerId !== null ? { workerId: job.workerId } : {}),
-    ...(job.workspacePath !== null ? { workspacePath: job.workspacePath } : {}),
-    createdAt: job.createdAt.toISOString(),
-    ...(job.startedAt !== null ? { startedAt: job.startedAt.toISOString() } : {}),
-    ...(job.completedAt !== null ? { completedAt: job.completedAt.toISOString() } : {}),
-    timeoutSeconds: job.timeoutSeconds,
-    ...(job.exitCode !== null ? { exitCode: job.exitCode } : {}),
-    ...(job.errorMessage !== null ? { errorMessage: job.errorMessage } : {}),
-    ...(job.outputS3Key !== null ? { outputS3Key: job.outputS3Key } : {}),
+    ...(job.workerId !== null ? { worker_id: job.workerId } : {}),
+    ...(job.workspacePath !== null ? { workspace_path: job.workspacePath } : {}),
+    created_at: job.createdAt.toISOString(),
+    ...(job.startedAt !== null ? { started_at: job.startedAt.toISOString() } : {}),
+    ...(job.completedAt !== null ? { completed_at: job.completedAt.toISOString() } : {}),
+    timeout_seconds: job.timeoutSeconds,
+    ...(job.exitCode !== null ? { exit_code: job.exitCode } : {}),
+    ...(job.errorMessage !== null ? { error_message: job.errorMessage } : {}),
+    ...(job.outputS3Key !== null ? { output_s3_key: job.outputS3Key } : {}),
   };
 }

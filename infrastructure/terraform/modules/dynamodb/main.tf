@@ -135,6 +135,11 @@ resource "aws_dynamodb_table" "dispatches" {
     type = "S"
   }
 
+  attribute {
+    name = "task_arn"
+    type = "S"
+  }
+
   global_secondary_index {
     name            = "user-dispatches-index"
     hash_key        = "user_id"
@@ -147,6 +152,14 @@ resource "aws_dynamodb_table" "dispatches" {
     hash_key        = "status"
     range_key       = "started_at"
     projection_type = "ALL"
+  }
+
+  # GSI for task_arn lookup - enables O(1) dispatch lookup by ECS task ARN
+  # Created for T2.2 performance optimization (p95 497ms -> <100ms target)
+  global_secondary_index {
+    name            = "task_arn-index"
+    hash_key        = "task_arn"
+    projection_type = "KEYS_ONLY"
   }
 
   point_in_time_recovery {
