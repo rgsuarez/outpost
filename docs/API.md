@@ -86,7 +86,7 @@ All responses follow a consistent JSON structure:
 
 ### Success Response
 
-```json
+```jsonc
 {
   "success": true,
   "data": {
@@ -101,7 +101,7 @@ All responses follow a consistent JSON structure:
 
 ### Error Response
 
-```json
+```jsonc
 {
   "success": false,
   "error": {

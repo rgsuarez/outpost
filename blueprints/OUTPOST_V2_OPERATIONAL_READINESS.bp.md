@@ -1360,7 +1360,6 @@ tiers:
             # Paginate results
             curl -X GET 'http://outpost-control-plane.../api/v1/dispatches?limit=20&cursor=eyJk...'
             ```
-            ```
 
         acceptance_criteria:
           - "Endpoint fully documented"

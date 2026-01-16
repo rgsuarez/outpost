@@ -601,7 +601,6 @@ notes: |
     }
   }
   ```
-```
 
 ### T1.1.2: ALB Security Group
 
@@ -1048,7 +1047,6 @@ notes: |
     getArtifacts(jobId: string): Promise<ArtifactsResponse>;
   }
   ```
-```
 
 ### T2.1.1: HTTP Client Implementation
 
@@ -1225,7 +1223,6 @@ notes: |
     ssmInstanceId: z.string().optional().describe('@deprecated Use apiEndpoint'),
   });
   ```
-```
 
 ### T2.3: Implement Tool Handlers
 
@@ -1304,7 +1301,6 @@ notes: |
     timeoutSeconds?: number,
   }
   ```
-```
 
 ### T2.3.2: Implement outpost_status Tool
 
@@ -1967,7 +1963,6 @@ notes: |
     });
   });
   ```
-```
 
 ### T3.4: Create CloudTrail Terraform Module
 
@@ -2044,7 +2039,6 @@ notes: |
     }
   }
   ```
-```
 
 ### T3.5: Deploy CloudTrail Infrastructure
 

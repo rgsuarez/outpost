@@ -391,7 +391,6 @@ def get_task(args):
         return sys.stdin.read().strip()
     return None
 ```
-```
 
 **Acceptance Criteria:**
 - [ ] Standard documented clearly

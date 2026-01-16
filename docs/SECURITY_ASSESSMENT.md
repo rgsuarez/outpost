@@ -109,10 +109,10 @@ The Outpost V2 infrastructure demonstrates strong security practices with proper
 | `secrets-access` | Inline | Secrets Manager GetSecretValue | PASS |
 
 **Inline Policy Analysis:**
-```json
+```jsonc
 {
   "secretsmanager:GetSecretValue": "arn:aws:secretsmanager:*:*:secret:/outpost/*",
-  "kms:Decrypt": "*" (conditioned on kms:ViaService = secretsmanager)
+  "kms:Decrypt": "*" // conditioned on kms:ViaService = secretsmanager
 }
 ```
 
